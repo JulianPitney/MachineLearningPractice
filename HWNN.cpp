@@ -29,7 +29,7 @@ Mat getImage(char* imgPath) {
 }
 
 
-imgDimensions getImgDimensions(Mat img) {
+struct imgDimensions getImgDimensions(Mat img) {
 
 	struct imgDimensions output;
 
@@ -90,29 +90,54 @@ public:
 	vector<SigmoidNeuron*> outputLayer;
 
 
-	bool feedInputLayer(char* imgPath);
+	void feedInputLayer(Mat img);
+	void populateInputLayer(struct imgDimensions dims);
+	void populateHiddenLayer(int hLayerSize);
+	void populateOutputLayer(int oLayerSize);
 };
 
-bool NeuralNetwork::feedInputLayer(char* imgPath) {
+void NeuralNetwork::feedInputLayer(Mat img) {
 
-	Mat img = getImage(imgPath);
-	int channels = img.channels();
-	int rows = img.rows;
-	int cols = img.cols * channels;
-	
+	struct imgDimensions dims = getImgDimensions(img);	
+
 	uchar* p = img.data;
 	int currentNeuron = 0;
 
-	for(int i = 0; i < rows; i++)
+	for(int i = 0; i < dims.rows; i++)
 	{
 		p = img.ptr<uchar>(i);
-		for(int x = 0; x< cols; x++)
+		for(int x = 0; x< dims.cols; x++)
 		{
 			inputLayer[currentNeuron]->inputValues.push_back((float)p[x]/255.00);
 			currentNeuron++;
 		}
 	}		
 
+}
+
+void NeuralNetwork::populateInputLayer(struct imgDimensions dims) {
+
+	for(int i = 0; i < dims.rows*dims.cols; i++)
+	{
+		this->inputLayer.push_back(new SigmoidNeuron);
+	}
+
+}
+
+void NeuralNetwork::populateHiddenLayer(int hLayerSize) {
+
+	for(int i = 0; i < hLayerSize; i++)
+	{
+		this->hiddenLayer.push_back(new SigmoidNeuron);
+	}
+}
+
+void NeuralNetwork::populateOutputLayer(int oLayerSize) {
+
+	for(int i = 0; i < oLayerSize; i++)
+	{
+		this->outputLayer.push_back(new SigmoidNeuron);
+	}
 }
 
 
@@ -122,34 +147,14 @@ int main(int argc, char** argv)
 	NeuralNetwork test;
 	Mat img = getImage(argv[1]);
 	struct imgDimensions dims = getImgDimensions(img);
-	int cols = dims.cols;
-	int rows = dims.rows;
-	int channels = dims.channels;
 	
-	// Populate input layer	
-	for(int i = 0; i < rows*cols; i++)
-	{
-		test.inputLayer.push_back(new SigmoidNeuron);
-	}
-
-
-	// Populate hidden layer(s)
-	
-	// Populate output layer
-	for(int i = 0; i < 10; i++)
-	{
-		test.outputLayer.push_back(new SigmoidNeuron);
-	}
+	test.populateInputLayer(dims);
+	test.populateHiddenLayer(15);
+	test.populateOutputLayer(10);
 
 	// Connect All layers (
 
-	// Feed input layer with image
-	test.feedInputLayer(argv[1]);
-
-	
-	cout << "Expected dimensions: W="<<img.cols << "H=" << img.rows << "C=" << img.channels() << endl;
-	cout << "Actual dimensions: W="<<cols << "H=" << rows << "C=" << channels << endl;
-
+	test.feedInputLayer(img);
 
 	return 0;
 }
