@@ -127,7 +127,7 @@ public:
 	void populateOutputLayer(int oLayerSize);
 	void fireNeuralNetwork(Mat inputImage, int targetValue);
 	
-	void calculateOLWeightGradients();
+	void calculateOutputLayerGradients();
 };
 
 // Populates layers with default weights and Biases (must be called after populating
@@ -257,7 +257,7 @@ void NeuralNetwork::fireNeuralNetwork(Mat inputImage, int targetValue) {
 // which kinda fucks up the gradient calculations. There may be something wrong with
 // the pipeline leading up to calculating hidden layer node outputs. Need to look into
 // why/how those nodes are outputting 0.
-void NeuralNetwork::calculateOLWeightGradients() {
+void NeuralNetwork::calculateOutputLayerGradients() {
 
 	float targetValues[outputLayer.size()];
 	float actualValues[outputLayer.size()];
@@ -287,23 +287,36 @@ void NeuralNetwork::calculateOLWeightGradients() {
 	}
 
 	
-	// Calculate Output Layer Weight Gradients
+	// Calculate Output Layer Gradients
 	for (unsigned int i = 0; i < outputLayer.size(); i++)
 	{
+		float tempBiasGradient;
+		float AV = actualValues[i];
+		float TV = targetValues[i];
+		float z = outputLayerInputs_z[i];
+		// Output layer bias gradient for node i of output layer
+		tempBiasGradient = (AV - TV) * (exp(z) / (exp(z) + 1)*(exp(z)+ 1));
+		outputLayerBiasGradients.push_back(tempBiasGradient);
+		cout << "BIas gradient=" << tempBiasGradient << endl;
+
 		for (unsigned int x = 0; x < hiddenLayer.size(); x++)
 		{
-			float tempGradient;
-			float AV = actualValues[i];
-			float TV = targetValues[i];
-			float z = outputLayerInputs_z[i];
 			float a = hiddenLayerOutputs[x];
-			tempGradient = (AV - TV) * (exp(z) / (exp(z) + 1)*(exp(z)+ 1)) * a;
-			outputLayerWeightGradients.push_back(tempGradient);
+			float tempWeightGradient = tempBiasGradient;
+			// Output layer weight gradient for weight connecting node x of hidden layer to 
+			// node i of output layer
+			tempWeightGradient *= a;
+			outputLayerWeightGradients.push_back(tempWeightGradient);	
+			cout << "Weight gradient=" << tempWeightGradient << endl;
 		}
 	}
 
+
+
+
 }
 
+	
 int main(int argc, char** argv)
 {
 
@@ -319,12 +332,6 @@ int main(int argc, char** argv)
 
 	test.fireNeuralNetwork(img,6);
 	
-	test.calculateOLWeightGradients();
-
-	for (unsigned int i = 0; i < test.hiddenLayer.size(); i++)
-	{
-		cout << test.hiddenLayer[i]->output << endl;
-	}
-
+	test.calculateOutputLayerGradients();
 	return 0;
 }
