@@ -4,6 +4,7 @@
 #include<stdlib.h>
 #include<cv.h>
 #include<highgui.h>
+#include<random>
 
 using namespace std;
 using namespace cv;
@@ -52,12 +53,21 @@ public:
 	double bias; // Between 0-1 (not sure)
 
 	// This is defined/computed by the sigmoid function and can take any value from 0 to 1
-	double output;
+	float output = 0;
 
-
+	void collectInputs(vector<SigmoidNeuron*>& previousLayer);
 	float calculateOutput();
 
 };
+
+
+void SigmoidNeuron::collectInputs(vector<SigmoidNeuron*>& previousLayer) {
+
+	for(unsigned int i = 0; i < previousLayer.size(); i++)
+	{
+		inputValues.push_back(previousLayer[i]->output);
+	}
+}
 
 
 // Uses sigmoid function to calculate output value of neuron
@@ -71,10 +81,15 @@ float SigmoidNeuron::calculateOutput() {
 		z += inputWeights[i] * inputValues[i];
 	}
 
-	z += bias;
+	z -= bias;
 	
 	// Sigmoid function
-	output = (1) / (1 + exp(-z)); 
+	output = (1.00) / (1.00 + exp(-z)); 
+	
+	cout << "bias=" << bias << endl;
+	cout << "z=" << z << endl;
+	cout << "output=" << output << endl;
+
 	return output;
 }
 
@@ -91,10 +106,39 @@ public:
 
 
 	void feedInputLayer(Mat img);
+	void setDefaultWeights();
+	void updateInputLayer();
+	void updateHiddenLayer();
+	void updateOutputLayer();
 	void populateInputLayer(struct imgDimensions dims);
 	void populateHiddenLayer(int hLayerSize);
 	void populateOutputLayer(int oLayerSize);
 };
+
+// Populates layers with default weights and Biases (must be called after populating
+// all layers (using populateXXXXXX functions)
+void NeuralNetwork::setDefaultWeights() {
+
+	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		for(unsigned int x = 0; x < inputLayer.size(); x++)
+		{
+			float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+			hiddenLayer[i]->inputWeights.push_back(r);
+		}	
+		hiddenLayer[i]->bias = (float) (rand() % inputLayer.size() + 1);
+	}
+
+	for (unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		for ( unsigned int x = 0; x < hiddenLayer.size(); x++)
+		{
+			float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+			outputLayer[i]->inputWeights.push_back(r);
+		}
+		outputLayer[i]->bias = (float) (rand() % hiddenLayer.size() + 1);
+	}	
+}
 
 void NeuralNetwork::feedInputLayer(Mat img) {
 
@@ -108,11 +152,29 @@ void NeuralNetwork::feedInputLayer(Mat img) {
 		p = img.ptr<uchar>(i);
 		for(int x = 0; x< dims.cols; x++)
 		{
-			inputLayer[currentNeuron]->inputValues.push_back((float)p[x]/255.00);
+			inputLayer[currentNeuron]->output = (float)p[x]/255.00;
 			currentNeuron++;
 		}
 	}		
 
+}
+
+void NeuralNetwork::updateHiddenLayer() {
+
+	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		hiddenLayer[i]->collectInputs(inputLayer);
+		hiddenLayer[i]->calculateOutput();
+	}
+}
+
+void NeuralNetwork::updateOutputLayer() {
+
+	for(unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		outputLayer[i]->collectInputs(hiddenLayer);
+		outputLayer[i]->calculateOutput();
+	}
 }
 
 void NeuralNetwork::populateInputLayer(struct imgDimensions dims) {
@@ -141,6 +203,7 @@ void NeuralNetwork::populateOutputLayer(int oLayerSize) {
 }
 
 
+
 int main(int argc, char** argv)
 {
 
@@ -151,10 +214,12 @@ int main(int argc, char** argv)
 	test.populateInputLayer(dims);
 	test.populateHiddenLayer(15);
 	test.populateOutputLayer(10);
-
-	// Connect All layers (
+	test.setDefaultWeights();
 
 	test.feedInputLayer(img);
+	test.updateHiddenLayer();
+	test.updateOutputLayer();
+
 
 	return 0;
 }
