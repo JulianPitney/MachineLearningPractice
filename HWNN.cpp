@@ -54,7 +54,9 @@ public:
 
 	// This is defined/computed by the sigmoid function and can take any value from 0 to 1
 	float output = 0;
-
+	// Input to sigmoid function (Need to save this each time we calculate neuron's output as it's used in
+	// calculating gradients for backpropagation
+	float sigmoidInput_z = 0;
 	void collectInputs(vector<SigmoidNeuron*>& previousLayer);
 	float calculateOutput();
 
@@ -82,14 +84,13 @@ float SigmoidNeuron::calculateOutput() {
 	}
 
 	z -= bias;
-	
+
+	// Saving sigmoid input for gradient descent calculations later on
+	sigmoidInput_z = z;
+
 	// Sigmoid function
 	output = (1.00) / (1.00 + exp(-z)); 
 	
-	cout << "bias=" << bias << endl;
-	cout << "z=" << z << endl;
-	cout << "output=" << output << endl;
-
 	return output;
 }
 
@@ -100,19 +101,33 @@ class NeuralNetwork
 
 public:
 
+	// Network Layers
 	vector<SigmoidNeuron*> inputLayer;
 	vector<SigmoidNeuron*> hiddenLayer;
 	vector<SigmoidNeuron*> outputLayer;
 
+	int targetValue;
 
+	// Gradient Values
+	vector<float> outputLayerWeightGradients;
+	vector<float> outputLayerBiasGradients;
+	vector<float> hiddenLayerWeightGradients;
+	vector<float> hiddenLayerBiasGradients;
+	
 	void feedInputLayer(Mat img);
+	void setTargetValue(int targetValue);
 	void setDefaultWeights();
 	void updateInputLayer();
 	void updateHiddenLayer();
 	void updateOutputLayer();
+	void purgeHiddenLayer();
+	void purgeOutputLayer();
 	void populateInputLayer(struct imgDimensions dims);
 	void populateHiddenLayer(int hLayerSize);
 	void populateOutputLayer(int oLayerSize);
+	void fireNeuralNetwork(Mat inputImage, int targetValue);
+	
+	void calculateOLWeightGradients();
 };
 
 // Populates layers with default weights and Biases (must be called after populating
@@ -159,12 +174,27 @@ void NeuralNetwork::feedInputLayer(Mat img) {
 
 }
 
+
+// Target values start at 0 (e.g if target is 1 then 0th node in outputLayer should be 1, so set target to 0)
+void NeuralNetwork::setTargetValue(int targetValue) {
+
+	this->targetValue = targetValue;
+}
+
 void NeuralNetwork::updateHiddenLayer() {
 
 	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
 	{
 		hiddenLayer[i]->collectInputs(inputLayer);
 		hiddenLayer[i]->calculateOutput();
+	}
+}
+
+void NeuralNetwork::purgeHiddenLayer() {
+
+	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		hiddenLayer[i]->inputValues.clear();	
 	}
 }
 
@@ -175,6 +205,15 @@ void NeuralNetwork::updateOutputLayer() {
 		outputLayer[i]->collectInputs(hiddenLayer);
 		outputLayer[i]->calculateOutput();
 	}
+}
+
+void NeuralNetwork::purgeOutputLayer() {
+
+	for(unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		outputLayer[i]->inputValues.clear();
+	}
+
 }
 
 void NeuralNetwork::populateInputLayer(struct imgDimensions dims) {
@@ -202,24 +241,90 @@ void NeuralNetwork::populateOutputLayer(int oLayerSize) {
 	}
 }
 
+void NeuralNetwork::fireNeuralNetwork(Mat inputImage, int targetValue) {
 
+	purgeHiddenLayer();
+	purgeOutputLayer();
+	feedInputLayer(inputImage);
+	setTargetValue(targetValue);
+	updateHiddenLayer();
+	updateOutputLayer();
+
+}
+
+
+// This seems to be working okay, but the hidden layer is routinely outputting 0's,
+// which kinda fucks up the gradient calculations. There may be something wrong with
+// the pipeline leading up to calculating hidden layer node outputs. Need to look into
+// why/how those nodes are outputting 0.
+void NeuralNetwork::calculateOLWeightGradients() {
+
+	float targetValues[outputLayer.size()];
+	float actualValues[outputLayer.size()];
+	float outputLayerInputs_z[outputLayer.size()];
+	float hiddenLayerOutputs[hiddenLayer.size()];
+
+	// Collecting values 
+	for(unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		if (i == targetValue)
+		{
+			targetValues[i] = (float) 1.000;
+		}
+		else
+		{
+			targetValues[i] = (float) 0.000;
+		}
+
+		actualValues[i] = outputLayer[i]->output;
+		outputLayerInputs_z[i] = outputLayer[i]->sigmoidInput_z;
+	}
+
+	// Collecting more values
+	for(unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		hiddenLayerOutputs[i] = hiddenLayer[i]->output;
+	}
+
+	
+	// Calculate Output Layer Weight Gradients
+	for (unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		for (unsigned int x = 0; x < hiddenLayer.size(); x++)
+		{
+			float tempGradient;
+			float AV = actualValues[i];
+			float TV = targetValues[i];
+			float z = outputLayerInputs_z[i];
+			float a = hiddenLayerOutputs[x];
+			tempGradient = (AV - TV) * (exp(z) / (exp(z) + 1)*(exp(z)+ 1)) * a;
+			outputLayerWeightGradients.push_back(tempGradient);
+		}
+	}
+
+}
 
 int main(int argc, char** argv)
 {
 
+	// Create and Init neural network
 	NeuralNetwork test;
 	Mat img = getImage(argv[1]);
 	struct imgDimensions dims = getImgDimensions(img);
-	
 	test.populateInputLayer(dims);
 	test.populateHiddenLayer(15);
 	test.populateOutputLayer(10);
 	test.setDefaultWeights();
 
-	test.feedInputLayer(img);
-	test.updateHiddenLayer();
-	test.updateOutputLayer();
 
+	test.fireNeuralNetwork(img,6);
+	
+	test.calculateOLWeightGradients();
+
+	for (unsigned int i = 0; i < test.hiddenLayer.size(); i++)
+	{
+		cout << test.hiddenLayer[i]->output << endl;
+	}
 
 	return 0;
 }
