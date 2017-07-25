@@ -5,6 +5,8 @@
 #include<cv.h>
 #include<highgui.h>
 #include<random>
+#include<fstream>
+
 
 using namespace std;
 using namespace cv;
@@ -37,7 +39,6 @@ struct imgDimensions getImgDimensions(Mat img) {
 	output.rows = img.rows;
 	output.cols = img.cols;
 	output.channels = img.channels();
-
 	return output;
 }
 
@@ -108,7 +109,7 @@ public:
 
 	int targetValue;
 
-	// Gradient Values
+	// Gradient Values (these need to be purged after each run of network)
 	vector<float> outputLayerWeightGradients;
 	vector<float> outputLayerBiasGradients;
 	vector<float> hiddenLayerWeightGradients;
@@ -128,6 +129,7 @@ public:
 	void fireNeuralNetwork(Mat inputImage, int targetValue);
 	
 	void calculateOutputLayerGradients();
+	void calculateHiddenLayerGradients();
 };
 
 // Populates layers with default weights and Biases (must be called after populating
@@ -141,6 +143,7 @@ void NeuralNetwork::setDefaultWeights() {
 			float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
 			hiddenLayer[i]->inputWeights.push_back(r);
 		}	
+
 		hiddenLayer[i]->bias = (float) (rand() % inputLayer.size() + 1);
 	}
 
@@ -151,6 +154,7 @@ void NeuralNetwork::setDefaultWeights() {
 			float r = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
 			outputLayer[i]->inputWeights.push_back(r);
 		}
+		
 		outputLayer[i]->bias = (float) (rand() % hiddenLayer.size() + 1);
 	}	
 }
@@ -297,7 +301,6 @@ void NeuralNetwork::calculateOutputLayerGradients() {
 		// Output layer bias gradient for node i of output layer
 		tempBiasGradient = (AV - TV) * (exp(z) / (exp(z) + 1)*(exp(z)+ 1));
 		outputLayerBiasGradients.push_back(tempBiasGradient);
-		cout << "BIas gradient=" << tempBiasGradient << endl;
 
 		for (unsigned int x = 0; x < hiddenLayer.size(); x++)
 		{
@@ -307,7 +310,6 @@ void NeuralNetwork::calculateOutputLayerGradients() {
 			// node i of output layer
 			tempWeightGradient *= a;
 			outputLayerWeightGradients.push_back(tempWeightGradient);	
-			cout << "Weight gradient=" << tempWeightGradient << endl;
 		}
 	}
 
@@ -316,22 +318,198 @@ void NeuralNetwork::calculateOutputLayerGradients() {
 
 }
 
+void NeuralNetwork::calculateHiddenLayerGradients() {
+
+	float inputLayerOutput_NodeI[inputLayer.size()]; // a sub i
+	float hiddenLayerInputs_z[hiddenLayer.size()]; // z sub j
+	float outputLayerOutputs[outputLayer.size()]; // a sub k
+	float targetOutput[outputLayer.size()];	// t sub k
+	float outputLayerInputs_z[outputLayer.size()]; // z sub k
+	float hiddenLayertoOutputLayerWeights[outputLayer.size()][hiddenLayer.size()]; // w sub jk
+
+
+	// sets a sub i
+	for(unsigned int i = 0; i < inputLayer.size(); i++)
+	{
+		inputLayerOutput_NodeI[i] = inputLayer[i]->output;
+	}
 	
+	// sets z sub j
+	for(unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		hiddenLayerInputs_z[i] = hiddenLayer[i]->sigmoidInput_z;
+	}
+	
+	// Sets a sub k && t sub k && z sub k	
+	for(unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		outputLayerOutputs[i] = outputLayer[i]->output;
+
+		outputLayerInputs_z[i] = outputLayer[i]->sigmoidInput_z;	
+
+		if (i == targetValue)
+		{
+			targetOutput[i] = (float) 1.000;
+		}
+		else
+		{
+			targetOutput[i] = (float) 0.000;
+		}
+	}
+
+	// Sets w sub jk
+	for (unsigned int i = 0; i < outputLayer.size(); i++)
+	{
+		for(unsigned int x = 0; x < hiddenLayer.size(); x++)
+		{
+			hiddenLayertoOutputLayerWeights[i][x] = outputLayer[i]->inputWeights[x];
+		}	
+	}
+
+
+
+	// Start gradient calculations
+	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
+	{
+		int z_temp = hiddenLayerInputs_z[i];
+		float term1 = exp(z_temp);
+		float term2 = (1 + term1) * (1 + term1);
+		float gPrimeOfJ = term1/term2;
+
+		float dSubK;
+		float Sum = 0;
+
+		for (unsigned int x = 0; x < outputLayer.size(); x++)
+		{
+			dSubK = (outputLayerOutputs[x] - targetOutput[x]) * (( exp(outputLayerInputs_z[x])) / (1 + exp(outputLayerInputs_z[x]) * exp(outputLayerInputs_z[x])));
+			dSubK *= hiddenLayertoOutputLayerWeights[x][i];
+			Sum += dSubK;				
+			
+		}
+
+
+		float biasGradientTemp = gPrimeOfJ * Sum;
+		this->hiddenLayerBiasGradients.push_back(biasGradientTemp);
+
+		for(unsigned int x = 0; x < inputLayer.size(); x++)
+		{
+			float aSubI = inputLayerOutput_NodeI[x];
+			float weightGradientTemp = biasGradientTemp * aSubI;
+			hiddenLayerWeightGradients.push_back(weightGradientTemp);
+		}
+
+
+	} 
+
+}
+
+
+
+
+int reverseInt (int i) 
+{
+    unsigned char c1, c2, c3, c4;
+
+    c1 = i & 255;
+    c2 = (i >> 8) & 255;
+    c3 = (i >> 16) & 255;
+    c4 = (i >> 24) & 255;
+
+    return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
+}
+
+
+// Reads and loads mnist data set into memory
+unsigned char* read_mnist(const char* full_path)
+{
+    ifstream file (full_path);
+
+    // This array assumes 60,000 images containing 784(28x28) bytes each
+    // (784 x 60,000 = 47,040,000)
+    // Modify size to accomodate different sized/numbers of images
+    unsigned char* images = new unsigned char[47040000];
+    int imagesCounter = 0;
+
+    if (file.is_open())
+    {
+        int magic_number=0;
+        int number_of_images=0;
+        int n_rows=0;
+        int n_cols=0;
+        file.read((char*)&magic_number,sizeof(magic_number)); 
+        magic_number= reverseInt(magic_number);
+        file.read((char*)&number_of_images,sizeof(number_of_images));
+        number_of_images= reverseInt(number_of_images);
+        file.read((char*)&n_rows,sizeof(n_rows));
+        n_rows= reverseInt(n_rows);
+        file.read((char*)&n_cols,sizeof(n_cols));
+        n_cols= reverseInt(n_cols);
+
+        for(int i=0;i<number_of_images;++i)
+        {
+            for(int r=0;r<n_rows;++r)
+            {
+                for(int c=0;c<n_cols;++c)
+                {
+                    unsigned char temp=0;
+                    file.read((char*)&temp,sizeof(temp));
+		    images[imagesCounter] = temp;
+		    imagesCounter++;
+                }
+            }
+        }
+    }
+    return images;
+}
+
+// Takes array containing mnist images and starting position of desired image in that array,
+// and returns Mat containing desired image
+Mat dispense_mnist(int imgCounter, unsigned char* images) {
+
+	Mat imgDest(28,28, CV_8UC1);	
+	uchar* p = imgDest.data;
+
+	for(unsigned int row = 0; row < 28; row++)
+	{
+		p = imgDest.ptr<uchar>(row);
+
+		for(unsigned int col = 0; col < 28; col++)
+		{
+			p[col] = images[imgCounter];
+			imgCounter++;
+		}	
+	}
+
+	return imgDest;
+}
+	
+
 int main(int argc, char** argv)
 {
+	// Load images into memory
+	unsigned char* images = read_mnist(argv[1]);
+	int imgCounter = 0;
 
-	// Create and Init neural network
-	NeuralNetwork test;
-	Mat img = getImage(argv[1]);
+	// Grab image from images array and update pixel position
+	Mat img;
+	img = dispense_mnist(imgCounter, images);
+	imgCounter += 784;
+
+	// Get img dimensions
 	struct imgDimensions dims = getImgDimensions(img);
-	test.populateInputLayer(dims);
-	test.populateHiddenLayer(15);
-	test.populateOutputLayer(10);
-	test.setDefaultWeights();
+
+	// Create and init neural network
+	NeuralNetwork nn;
+	nn.populateInputLayer(dims);
+	nn.populateHiddenLayer(15);
+	nn.populateOutputLayer(10);
+	nn.setDefaultWeights();
+
+	// Fire neural network
+	nn.fireNeuralNetwork(img,5);
+	nn.calculateOutputLayerGradients();
+	nn.calculateHiddenLayerGradients();
 
 
-	test.fireNeuralNetwork(img,6);
-	
-	test.calculateOutputLayerGradients();
 	return 0;
 }
