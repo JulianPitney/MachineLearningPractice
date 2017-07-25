@@ -420,15 +420,10 @@ int reverseInt (int i)
 
 
 // Reads and loads mnist data set into memory
-unsigned char* read_mnist(const char* full_path)
+unsigned char* read_mnist_images(const char* full_path)
 {
     ifstream file (full_path);
-
-    // This array assumes 60,000 images containing 784(28x28) bytes each
-    // (784 x 60,000 = 47,040,000)
-    // Modify size to accomodate different sized/numbers of images
-    unsigned char* images = new unsigned char[47040000];
-    int imagesCounter = 0;
+    unsigned char* images;
 
     if (file.is_open())
     {
@@ -436,14 +431,21 @@ unsigned char* read_mnist(const char* full_path)
         int number_of_images=0;
         int n_rows=0;
         int n_cols=0;
+
         file.read((char*)&magic_number,sizeof(magic_number)); 
         magic_number= reverseInt(magic_number);
+
         file.read((char*)&number_of_images,sizeof(number_of_images));
         number_of_images= reverseInt(number_of_images);
+
         file.read((char*)&n_rows,sizeof(n_rows));
         n_rows= reverseInt(n_rows);
+
         file.read((char*)&n_cols,sizeof(n_cols));
         n_cols= reverseInt(n_cols);
+
+	images = new unsigned char[number_of_images * 784];
+    	int imagesCounter = 0;
 
         for(int i=0;i<number_of_images;++i)
         {
@@ -464,7 +466,7 @@ unsigned char* read_mnist(const char* full_path)
 
 // Takes array containing mnist images and starting position of desired image in that array,
 // and returns Mat containing desired image
-Mat dispense_mnist(int imgCounter, unsigned char* images) {
+Mat dispense_mnist_image(int imgCounter, unsigned char* images) {
 
 	Mat imgDest(28,28, CV_8UC1);	
 	uchar* p = imgDest.data;
@@ -487,13 +489,17 @@ Mat dispense_mnist(int imgCounter, unsigned char* images) {
 int main(int argc, char** argv)
 {
 	// Load images into memory
-	unsigned char* images = read_mnist(argv[1]);
+	unsigned char* images = read_mnist_images(argv[1]);
 	int imgCounter = 0;
 
 	// Grab image from images array and update pixel position
 	Mat img;
-	img = dispense_mnist(imgCounter, images);
+	img = dispense_mnist_image(imgCounter, images);
 	imgCounter += 784;
+
+	namedWindow("test",1);
+	imshow("test",img);
+	waitKey(0);
 
 	// Get img dimensions
 	struct imgDimensions dims = getImgDimensions(img);
