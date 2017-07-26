@@ -405,12 +405,12 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 
 
 
-
+// bitwise black magic
 int reverseInt (int i) 
 {
     unsigned char c1, c2, c3, c4;
 
-    c1 = i & 255;
+c1 = i & 255;
     c2 = (i >> 8) & 255;
     c3 = (i >> 16) & 255;
     c4 = (i >> 24) & 255;
@@ -418,6 +418,37 @@ int reverseInt (int i)
     return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
 }
 
+unsigned char* read_mnist_labels(const char* full_path) {
+
+	ifstream file(full_path);
+	unsigned char* labels;
+
+
+	if (file.is_open())
+	{
+
+		int magic_number=0;
+		int number_of_labels=0;
+
+		file.read((char*)&magic_number,sizeof(magic_number));
+		magic_number = reverseInt(magic_number);
+	
+		file.read((char*)&number_of_labels,sizeof(number_of_labels));
+		number_of_labels = reverseInt(number_of_labels);
+
+		labels = new unsigned char[number_of_labels];
+
+		for(unsigned int i = 0; i < number_of_labels; i++)
+		{
+			unsigned char temp=0;
+			file.read((char*)&temp,sizeof(temp));
+			labels[i] = temp;
+		}
+	}
+
+	return labels;
+
+}
 
 // Reads and loads mnist data set into memory
 unsigned char* read_mnist_images(const char* full_path)
@@ -466,9 +497,8 @@ unsigned char* read_mnist_images(const char* full_path)
 
 // Takes array containing mnist images and starting position of desired image in that array,
 // and returns Mat containing desired image
-Mat dispense_mnist_image(int imgCounter, unsigned char* images) {
+void dispense_mnist_image(int* imgCounter, unsigned char* images, Mat imgDest) {
 
-	Mat imgDest(28,28, CV_8UC1);	
 	uchar* p = imgDest.data;
 
 	for(unsigned int row = 0; row < 28; row++)
@@ -477,45 +507,87 @@ Mat dispense_mnist_image(int imgCounter, unsigned char* images) {
 
 		for(unsigned int col = 0; col < 28; col++)
 		{
-			p[col] = images[imgCounter];
-			imgCounter++;
+			p[col] = images[*imgCounter];
+			*imgCounter = *imgCounter + 1;
 		}	
 	}
-
-	return imgDest;
 }
 	
+void dispense_mnist_label(int* labelCounter, unsigned char* labels, int* labelDest) {
+
+	*labelDest = labels[*labelCounter];
+	*labelCounter = *labelCounter + 1;
+}
 
 int main(int argc, char** argv)
 {
-	// Load images into memory
+	NeuralNetwork nn;
+
+	// Load images and labels into memory
 	unsigned char* images = read_mnist_images(argv[1]);
-	int imgCounter = 0;
+	unsigned char* labels = read_mnist_labels(argv[2]);
 
-	// Grab image from images array and update pixel position
-	Mat img;
-	img = dispense_mnist_image(imgCounter, images);
-	imgCounter += 784;
+	// Initialize containers for single mnist image/label
+	Mat img(28,28,CV_8UC1);
+	int* label = new int(0);
 
-	namedWindow("test",1);
-	imshow("test",img);
-	waitKey(0);
+	// Initialize counters to keep track of positions in mnist image/label arrays
+	int* imgCounter = new int(0);
+	int* labelCounter = new int(0);
 
-	// Get img dimensions
+	// Get img dimensions for network initialization
 	struct imgDimensions dims = getImgDimensions(img);
 
-	// Create and init neural network
-	NeuralNetwork nn;
+	// Initialize neurons, weights and biases of network
 	nn.populateInputLayer(dims);
 	nn.populateHiddenLayer(15);
 	nn.populateOutputLayer(10);
 	nn.setDefaultWeights();
 
+
+	// Dispense single mnist image with corresponding label and increment counters
+	dispense_mnist_image(imgCounter, images, img);
+	dispense_mnist_label(labelCounter, labels, label);
+
 	// Fire neural network
-	nn.fireNeuralNetwork(img,5);
+	nn.fireNeuralNetwork(img,*label);
 	nn.calculateOutputLayerGradients();
 	nn.calculateHiddenLayerGradients();
 
 
+	cout << "OutputLayer Weight Gradients" << endl;
+	for (int i = 0; i < nn.outputLayerWeightGradients.size(); i++)
+	{
+		cout << nn.outputLayerWeightGradients[i] << endl;
+	}
+	cout << endl << endl << endl;
+
+
+
+	cout << "OutputLayerBiasGradients" << endl;
+	for (int i = 0; i < nn.outputLayerBiasGradients.size(); i++)
+	{
+		cout << nn.outputLayerBiasGradients[i] << endl;
+	}
+	cout << endl << endl << endl;
+
+
+
+	cout << "HiddenLayer Bias Gradients" << endl;
+	for (int i = 0; i < nn.hiddenLayerBiasGradients.size(); i++)
+	{
+		cout << nn.hiddenLayerBiasGradients[i] << endl;
+	}
+	cout << endl << endl << endl;
+
+
+	cout << "HiddenLayer Weight Gradients" << endl;
+	for (int i = 0; i < nn.hiddenLayerWeightGradients.size(); i++)
+	{
+		cout << nn.hiddenLayerWeightGradients[i] << endl;
+	}
+
+
+	// TODO network math still needs to be debugged
 	return 0;
 }
