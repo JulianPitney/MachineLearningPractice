@@ -149,7 +149,7 @@ public:
 	void computeDeltaVs();
 	void UpdateNetworkVariables();
 	void purgeGradientDescentVectors();
-	void batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
+	void batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels, int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
 	void testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
 };
 
@@ -629,7 +629,7 @@ void dispense_mnist_label(int* labelCounter, unsigned char* labels, int* labelDe
 }
 
 
-void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels) {
+void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels, int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
 
 	for(int epoch = 0; epoch < epochs; epoch++)
 	{
@@ -720,6 +720,12 @@ void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsign
 		delete label;
 		delete imgCounter;
 		delete labelCounter;
+
+		if (epoch/10 == 0)
+		{
+			testNetwork(testSetSize, testImageSet, testLabelSet);
+		}
+
 	}
 }
 
@@ -816,8 +822,7 @@ int main(int argc, char** argv)
 	nn.setLearningRate(0.005);
 
 
-	nn.batchGradientDescent(1, 60000, images, labels);
-	nn.testNetwork(10000, testImages, testLabels);
+	nn.batchGradientDescent(100, 60000, images, labels, 10000, testImages, testLabels);
 	return 0;
 }	
 	
