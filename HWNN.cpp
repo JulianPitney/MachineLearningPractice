@@ -2,9 +2,9 @@
 #include<vector>
 #include<math.h>
 #include<stdlib.h>
-#include<opencv2/core.hpp>
-#include<opencv2/highgui.hpp>
-#include<opencv2/imgcodecs.hpp>
+#include<cv.h>
+#include<highgui.h>
+#include<cvwimage.h>
 #include<random>
 #include<fstream>
 #include<iomanip>
@@ -69,7 +69,7 @@ public:
 
 };
 
-
+// Feeds all outputs from previous layers neuron's into input of each neuron in current layer
 void SigmoidNeuron::collectInputs(vector<SigmoidNeuron*>& previousLayer) {
 
 	for (unsigned int i = 0; i < previousLayer.size(); i++)
@@ -91,7 +91,7 @@ float SigmoidNeuron::calculateOutput() {
 		z += inputWeights[i] * inputValues[i];
 	}
 
-	z += bias;
+	z -= bias;
 
 	// Saving sigmoid input for gradient descent calculations later on
 	sigmoidInput_z = z;
@@ -149,15 +149,14 @@ public:
 	void computeDeltaVs();
 	void UpdateNetworkVariables();
 	void purgeGradientDescentVectors();
-	void trainNetwork(Mat trainingInput, float trainingLabel);
-	void trainNetwork_MNIST(int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
+	void batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
 };
 
 // Populates layers with default weights and Biases (must be called after populating
 // all layers (using populateXXXXXX functions)
 void NeuralNetwork::setDefaultWeights() {
 
-	// Engine for normal distribution number generation with mean 0 and variation 1
+	// Engine for gaussian normal distribution number generation with mean 0 and variation 1
 	std::random_device rd;
 	std::mt19937 e2(rd());
 	std::normal_distribution<> dist(0, 1);
@@ -217,7 +216,7 @@ void NeuralNetwork::setTargetValue(float targetValue) {
 void NeuralNetwork::updateHiddenLayer() {
 
 	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
-	{
+	{	
 		hiddenLayer[i]->collectInputs(inputLayer);
 		hiddenLayer[i]->calculateOutput();
 	}
@@ -276,6 +275,7 @@ void NeuralNetwork::populateOutputLayer(int oLayerSize) {
 
 void NeuralNetwork::fireNeuralNetwork(Mat inputImage, float targetValue) {
 
+
 	purgeHiddenLayer();
 	purgeOutputLayer();
 	feedInputLayer(inputImage);
@@ -292,10 +292,10 @@ void NeuralNetwork::fireNeuralNetwork(Mat inputImage, float targetValue) {
 // why/how those nodes are outputting 0.
 void NeuralNetwork::calculateOutputLayerGradients() {
 
-	vector<float> targetValues(outputLayer.size());
-	vector<float> actualValues(outputLayer.size());
-	vector<float> outputLayerInputs_z(outputLayer.size());
-	vector<float> hiddenLayerOutputs(hiddenLayer.size());
+	vector<float> targetValues(outputLayer.size()); // t sub k
+	vector<float> actualValues(outputLayer.size()); // a sub k
+	vector<float> outputLayerInputs_z(outputLayer.size()); // z sub k
+	vector<float> hiddenLayerOutputs(hiddenLayer.size()); // a sub j
 
 	// Collecting values 
 	for (unsigned int i = 0; i < outputLayer.size(); i++)
@@ -338,7 +338,7 @@ void NeuralNetwork::calculateOutputLayerGradients() {
 			float tempWeightGradient = tempBiasGradient;
 			// Output layer weight gradient for weight connecting node x of hidden layer to 
 			// node i of output layer
-			tempWeightGradient *= a;
+			tempWeightGradient = tempWeightGradient * a;
 			outputLayerWeightGradients.push_back(tempWeightGradient);
 		}
 	}
@@ -361,20 +361,20 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 	float hiddenLayertoOutputLayerWeights[10][30]; // w sub jk
 
 
-																				   // sets a sub i
+	// sets a sub i (correct)
 	for (unsigned int i = 0; i < inputLayer.size(); i++)
 	{
 
 		inputLayerOutput_NodeI[i] = inputLayer[i]->output;
 	}
 
-	// sets z sub j
+	// sets z sub j (correct)
 	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
 	{
 		hiddenLayerInputs_z[i] = hiddenLayer[i]->sigmoidInput_z;
 	}
 
-	// Sets a sub k && t sub k && z sub k	
+	// Sets a sub k && t sub k && z sub k (correct)	
 	for (unsigned int i = 0; i < outputLayer.size(); i++)
 	{
 		outputLayerOutputs[i] = outputLayer[i]->output;
@@ -390,7 +390,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 		}
 	}
 
-	// Sets w sub jk
+	// Sets w sub jk (correct)
 	for (unsigned int i = 0; i < outputLayer.size(); i++)
 	{
 		for (unsigned int x = 0; x < hiddenLayer.size(); x++)
@@ -404,6 +404,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 	// Start gradient calculations
 	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
 	{
+		// correct
 		int z_temp = hiddenLayerInputs_z[i];
 		float term1 = exp(z_temp);
 		float term2 = (1 + term1) * (1 + term1);
@@ -415,7 +416,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 		for (unsigned int x = 0; x < outputLayer.size(); x++)
 		{
 			dSubK = (outputLayerOutputs[x] - targetOutput[x]) * (exp(outputLayerInputs_z[x]) / powf(exp(outputLayerInputs_z[x]) + 1, 2.00));
-			dSubK *= hiddenLayertoOutputLayerWeights[x][i];
+			dSubK = dSubK * hiddenLayertoOutputLayerWeights[x][i];
 			Sum += dSubK;
 
 		}
@@ -627,34 +628,139 @@ void dispense_mnist_label(int* labelCounter, unsigned char* labels, int* labelDe
 }
 
 
-void NeuralNetwork::trainNetwork(Mat trainingInput, float trainingLabel) {
+void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels) {
 
-	purgeGradientDescentVectors();
-	fireNeuralNetwork(trainingInput, trainingLabel);
-	calculateHiddenLayerGradients();
-	calculateOutputLayerGradients();
-	computeDeltaVs();
-	UpdateNetworkVariables();
-
-}
-
-
-void NeuralNetwork::trainNetwork_MNIST(int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels) {
-
-	Mat img(28, 28, CV_8UC1);
-	int* label = new int(0);
-
-	int* imgCounter = new int(0);
-	int* labelCounter = new int(0);
-
-	for (int i = 0; i < trainingSetSize; i++)
+	for(int epoch = 0; epoch < epochs; epoch++)
 	{
-		dispense_mnist_image(imgCounter, trainingImages, img);
-		dispense_mnist_label(labelCounter, trainingLabels, label);
 
-		trainNetwork(img, (float)*label);
+		Mat img(28, 28, CV_8UC1);
+		int* label = new int(0);
+
+		int* imgCounter = new int(0);
+		int* labelCounter = new int(0);
+
+		vector<float> averageHiddenLayerBiasGradients;
+		vector<float> averageHiddenLayerWeightGradients;
+		vector<float> averageOutputLayerBiasGradients;
+		vector<float> averageOutputLayerWeightGradients;
 
 
+		for (unsigned int i = 0; i < trainingSetSize; i++)
+		{
+			purgeGradientDescentVectors();
+			dispense_mnist_image(imgCounter, trainingImages, img);
+			dispense_mnist_label(labelCounter, trainingLabels, label);
+			fireNeuralNetwork(img, (float) *label);
+			calculateHiddenLayerGradients();
+			calculateOutputLayerGradients();
+
+			if(i == 0)
+			{
+				averageHiddenLayerBiasGradients = hiddenLayerBiasGradients;
+				averageHiddenLayerWeightGradients = hiddenLayerWeightGradients;
+				averageOutputLayerBiasGradients = outputLayerBiasGradients;
+				averageOutputLayerWeightGradients = outputLayerWeightGradients;
+			}
+			else
+			{
+				for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
+				{
+					averageHiddenLayerBiasGradients[x] += hiddenLayerBiasGradients[x];
+				}
+
+				for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
+				{
+					averageHiddenLayerWeightGradients[x] += hiddenLayerWeightGradients[x];
+				}
+
+				for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
+				{
+					averageOutputLayerBiasGradients[x] += outputLayerBiasGradients[x];
+				}
+
+				for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
+				{
+					averageOutputLayerWeightGradients[x] += outputLayerWeightGradients[x];
+				}
+			}
+		}
+
+		for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
+		{
+			averageHiddenLayerBiasGradients[x] = averageHiddenLayerBiasGradients[x] / trainingSetSize; 
+		}
+
+		for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
+		{
+			averageHiddenLayerWeightGradients[x] = averageHiddenLayerWeightGradients[x] / trainingSetSize;
+		}
+
+		for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
+		{
+			averageOutputLayerBiasGradients[x] = averageOutputLayerBiasGradients[x] / trainingSetSize;
+		}
+
+		for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
+		{
+			averageOutputLayerWeightGradients[x] = averageOutputLayerWeightGradients[x] / trainingSetSize;
+		}
+
+
+		purgeGradientDescentVectors();
+
+		hiddenLayerBiasGradients = averageHiddenLayerBiasGradients;
+		hiddenLayerWeightGradients = averageHiddenLayerWeightGradients;
+		outputLayerBiasGradients = averageOutputLayerBiasGradients;
+		outputLayerWeightGradients = averageOutputLayerWeightGradients;
+
+
+
+
+		// testing output for averaging gradients
+		cout << "HIdden Layer Bias Gradients:Size=" hiddenLayerBiasGradients.size() << endl << endl << endl;
+		for(unsigned int x = 0; x < hiddenLayerBiasGradients.size(); x++)
+		{
+			cout << hiddenLayerBiasGradients[x] << endl;
+		}
+		cout << endl << endl << endl;
+
+		cout << "hiddenLayerWeightGradients:Size=" hiddenLayerWeightGradients.size() << endl << endl << endl;
+		for(unsigned int x = 0; x < hiddenLayerWeightGradients.size(); x++)
+		{
+			cout << hiddenLayerWeightGradients[x] << endl;
+		}
+		cout << endl << endl << endl;
+
+
+		cout << "OutputLayerBIasGradients:Size=" outputLayerBiasGradients.size() << endl << endl << endl;
+		for(unsigned int x = 0; x < outputLayerBiasGradients.size(); x++)
+		{
+			cout << outputLayerBiasGradients[x] << endl;
+		}
+		cout << endl << endl << endl;
+
+
+
+		cout << "OutputLayerWeightGradients:Size=" << outputLayerWeightGradients.size() << endl << endl << endl;
+		for(unsigned int x = 0; x < outputLayerWeightGradients.size(); x++)
+		{
+			cout << outputLayerWeightGradients[x] << endl;
+		}
+		cout << endl << endl << endl;
+
+
+
+
+
+		computeDeltaVs();
+		UpdateNetworkVariables();
+		delete label;
+		delete imgCounter;
+		delete labelCounter;
+		
+
+		// code to check accuracy of network output
+		/*
 		cout << "Training Run: " << i << endl;
 		cout << "OutputNeurons Actual--->   ";
 		for (unsigned int x = 0; x < outputLayer.size(); x++)
@@ -678,9 +784,10 @@ void NeuralNetwork::trainNetwork_MNIST(int trainingSetSize, unsigned char* train
 		}
 		cout << endl;
 		cout << endl;
+		*/
 	}
-
 }
+
 
 
 int main(int argc, char** argv)
@@ -700,13 +807,12 @@ int main(int argc, char** argv)
 	nn.populateHiddenLayer(30);
 	nn.populateOutputLayer(10);
 	nn.setDefaultWeights();
-	nn.setLearningRate(0.9);
+	nn.setLearningRate(0.000005);
 
 
-	nn.trainNetwork_MNIST(60000, images, labels);
-
+	nn.batchGradientDescent(1, 60000, images, labels);
 	
-
-
 	return 0;
-}
+}	
+	
+	
