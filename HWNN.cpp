@@ -150,6 +150,7 @@ public:
 	void UpdateNetworkVariables();
 	void purgeGradientDescentVectors();
 	void batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
+	void testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
 };
 
 // Populates layers with default weights and Biases (must be called after populating
@@ -714,58 +715,47 @@ void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsign
 		outputLayerWeightGradients = averageOutputLayerWeightGradients;
 
 
-
-
-		// testing output for averaging gradients
-		cout << "HIdden Layer Bias Gradients:Size=" hiddenLayerBiasGradients.size() << endl << endl << endl;
-		for(unsigned int x = 0; x < hiddenLayerBiasGradients.size(); x++)
-		{
-			cout << hiddenLayerBiasGradients[x] << endl;
-		}
-		cout << endl << endl << endl;
-
-		cout << "hiddenLayerWeightGradients:Size=" hiddenLayerWeightGradients.size() << endl << endl << endl;
-		for(unsigned int x = 0; x < hiddenLayerWeightGradients.size(); x++)
-		{
-			cout << hiddenLayerWeightGradients[x] << endl;
-		}
-		cout << endl << endl << endl;
-
-
-		cout << "OutputLayerBIasGradients:Size=" outputLayerBiasGradients.size() << endl << endl << endl;
-		for(unsigned int x = 0; x < outputLayerBiasGradients.size(); x++)
-		{
-			cout << outputLayerBiasGradients[x] << endl;
-		}
-		cout << endl << endl << endl;
-
-
-
-		cout << "OutputLayerWeightGradients:Size=" << outputLayerWeightGradients.size() << endl << endl << endl;
-		for(unsigned int x = 0; x < outputLayerWeightGradients.size(); x++)
-		{
-			cout << outputLayerWeightGradients[x] << endl;
-		}
-		cout << endl << endl << endl;
-
-
-
-
-
 		computeDeltaVs();
 		UpdateNetworkVariables();
 		delete label;
 		delete imgCounter;
 		delete labelCounter;
-		
+	}
+}
 
-		// code to check accuracy of network output
-		/*
-		cout << "Training Run: " << i << endl;
+void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
+
+
+
+	Mat img(28, 28, CV_8UC1);
+	int* label = new int(0);
+	int* imgCounter = new int(0);
+	int* labelCounter = new int(0);
+
+	int correctCount = 0;
+	int incorrectCount = 0;
+
+	for(int i = 0; i < testSetSize; i++)
+	{
+		dispense_mnist_image(imgCounter, testImageSet, img);
+		dispense_mnist_label(labelCounter, testLabelSet, label);	
+		fireNeuralNetwork(img, (float)*label);
+
+		int actualMax = 0;
+		int actualMaxIndex = 0;
+	
+
+		cout << "Test Run: " << i << endl;
 		cout << "OutputNeurons Actual--->   ";
 		for (unsigned int x = 0; x < outputLayer.size(); x++)
 		{
 			cout << "[" << outputLayer[x]->output << "]";
+
+			if (outputLayer[x]->output > actualMax)
+			{
+				actualMax = outputLayer[x]->output;
+				actualMaxIndex = x;
+			}
 		}
 
 		cout << endl;
@@ -776,6 +766,14 @@ void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsign
 			if (x == *label)
 			{
 				cout << "[1]";
+				if(actualMaxIndex == x)
+				{
+					correctCount++;
+				}
+				else
+				{
+					incorrectCount++;
+				}
 			}
 			else
 			{
@@ -784,10 +782,15 @@ void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsign
 		}
 		cout << endl;
 		cout << endl;
-		*/
-	}
-}
 
+	}
+
+
+	cout << endl << endl << endl;
+	cout << "Correct=" << correctCount << endl;
+	cout << "Incorrect=" << incorrectCount << endl << endl;
+
+}
 
 
 int main(int argc, char** argv)
@@ -796,6 +799,9 @@ int main(int argc, char** argv)
 	// Load images and labels into memory
 	unsigned char* images = read_mnist_images(argv[1]);
 	unsigned char* labels = read_mnist_labels(argv[2]);
+
+	unsigned char* testImages = read_mnist_images(argv[3]);
+	unsigned char* testLabels = read_mnist_labels(argv[4]);
 
 	// Get img dimensions for network initialization
 	Mat img(28, 28, CV_8UC1);
@@ -807,11 +813,11 @@ int main(int argc, char** argv)
 	nn.populateHiddenLayer(30);
 	nn.populateOutputLayer(10);
 	nn.setDefaultWeights();
-	nn.setLearningRate(0.000005);
+	nn.setLearningRate(0.005);
 
 
 	nn.batchGradientDescent(1, 60000, images, labels);
-	
+	nn.testNetwork(10000, testImages, testLabels);
 	return 0;
 }	
 	
