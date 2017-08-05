@@ -138,7 +138,7 @@ public:
 	void updateOutputLayer();
 	void purgeHiddenLayer();
 	void purgeOutputLayer();
-	void populateInputLayer(struct imgDimensions dims);
+	void populateInputLayer(Mat img);
 	void populateHiddenLayer(int hLayerSize);
 	void populateOutputLayer(int oLayerSize);
 	void fireNeuralNetwork(Mat inputImage, float targetValue);
@@ -149,8 +149,12 @@ public:
 	void computeDeltaVs();
 	void UpdateNetworkVariables();
 	void purgeGradientDescentVectors();
-	void batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels, int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
+	void computeBatchAverageGradients (int batchSize, unsigned char* imageSet, unsigned char* labelSet, int* imgCounter, int* labelCounter);
+	void batchGradientDescent(int epochs, int batchSize, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
 	void testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
+
+
+	void printNetworkVariables();
 };
 
 // Populates layers with default weights and Biases (must be called after populating
@@ -249,7 +253,9 @@ void NeuralNetwork::purgeOutputLayer() {
 
 }
 
-void NeuralNetwork::populateInputLayer(struct imgDimensions dims) {
+void NeuralNetwork::populateInputLayer(Mat img) {
+
+	struct imgDimensions dims = getImgDimensions(img); 
 
 	for (int i = 0; i < dims.rows*dims.cols; i++)
 	{
@@ -329,7 +335,7 @@ void NeuralNetwork::calculateOutputLayerGradients() {
 		float TV = targetValues[i];
 		float z = outputLayerInputs_z[i];
 		// Output layer bias gradient for node i of output layer
-		tempBiasGradient = (AV - TV) * ((exp(z)) / powf(exp(z) + 1, 2.00));
+		tempBiasGradient = (AV - TV) * ((exp(-z)) / powf(exp(-z) + 1, 2.00));
 
 		outputLayerBiasGradients.push_back(tempBiasGradient);
 
@@ -359,7 +365,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 
 	// The size of this 2D array has been hardcoded since standard C++ doesn't support
 	// dynamic allocation of arrays....need to fix this eventually
-	float hiddenLayertoOutputLayerWeights[10][30]; // w sub jk
+	float hiddenLayertoOutputLayerWeights[outputLayer.size()][hiddenLayer.size()]; // w sub jk
 
 
 	// sets a sub i (correct)
@@ -407,7 +413,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 	{
 		// correct
 		int z_temp = hiddenLayerInputs_z[i];
-		float term1 = exp(z_temp);
+		float term1 = exp(-z_temp);
 		float term2 = (1 + term1) * (1 + term1);
 		float gPrimeOfJ = term1 / term2;
 
@@ -416,7 +422,7 @@ void NeuralNetwork::calculateHiddenLayerGradients() {
 
 		for (unsigned int x = 0; x < outputLayer.size(); x++)
 		{
-			dSubK = (outputLayerOutputs[x] - targetOutput[x]) * (exp(outputLayerInputs_z[x]) / powf(exp(outputLayerInputs_z[x]) + 1, 2.00));
+			dSubK = (outputLayerOutputs[x] - targetOutput[x]) * (exp(-outputLayerInputs_z[x]) / powf(exp(-outputLayerInputs_z[x]) + 1, 2.00));
 			dSubK = dSubK * hiddenLayertoOutputLayerWeights[x][i];
 			Sum += dSubK;
 
@@ -447,27 +453,30 @@ void NeuralNetwork::setLearningRate(float learningRate) {
 // These need to be purged after each input
 void NeuralNetwork::computeDeltaVs() {
 
+
+
+	// NOTE: TEMPORARILY REMOVED "*-1" to all deltaV calculations
 	for (unsigned int i = 0; i < outputLayerBiasGradients.size(); i++)
 	{
-		float tempDeltaV = (-1)*(learningRate)*(outputLayerBiasGradients[i]);
+		float tempDeltaV = (learningRate)*(outputLayerBiasGradients[i]);
 		outputLayerBiasDeltaVs.push_back(tempDeltaV);
 	}
 
 	for (unsigned int i = 0; i < outputLayerWeightGradients.size(); i++)
 	{
-		float tempDeltaV = (-1)*(learningRate)*(outputLayerWeightGradients[i]);
+		float tempDeltaV = (learningRate)*(outputLayerWeightGradients[i]);
 		outputLayerWeightDeltaVs.push_back(tempDeltaV);
 	}
 
 	for (unsigned int i = 0; i < hiddenLayerBiasGradients.size(); i++)
 	{
-		float tempDeltaV = (-1)*(learningRate)*(hiddenLayerBiasGradients[i]);
+		float tempDeltaV = (learningRate)*(hiddenLayerBiasGradients[i]);
 		hiddenLayerBiasDeltaVs.push_back(tempDeltaV);
 	}
 
 	for (unsigned int i = 0; i < hiddenLayerWeightGradients.size(); i++)
 	{
-		float tempDeltaV = (-1)*(learningRate)*(hiddenLayerWeightGradients[i]);
+		float tempDeltaV = (learningRate)*(hiddenLayerWeightGradients[i]);
 		hiddenLayerWeightDeltaVs.push_back(tempDeltaV);
 	}
 }
@@ -629,105 +638,156 @@ void dispense_mnist_label(int* labelCounter, unsigned char* labels, int* labelDe
 }
 
 
-void NeuralNetwork::batchGradientDescent(int epochs, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels, int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
+// Computes average gradient for a given batch 
+void NeuralNetwork::computeBatchAverageGradients (int batchSize, unsigned char* imageSet, unsigned char* labelSet, int* imgCounter, int* labelCounter) {
 
+	vector<float> averageHiddenLayerBiasGradients(hiddenLayer.size());
+	vector<float> averageHiddenLayerWeightGradients(inputLayer.size() * hiddenLayer.size());
+	vector<float> averageOutputLayerBiasGradients(outputLayer.size());
+	vector<float> averageOutputLayerWeightGradients(hiddenLayer.size() * outputLayer.size());
+
+	Mat img (28,28, CV_8UC1);
+	int* label = new int(0);
+
+	for(int i = 0; i < batchSize; i++)
+	{
+		purgeGradientDescentVectors();
+		dispense_mnist_image(imgCounter, imageSet, img);
+		dispense_mnist_label(labelCounter, labelSet, label);
+		fireNeuralNetwork(img, (float) *label);
+		calculateHiddenLayerGradients();
+		calculateOutputLayerGradients();
+
+		if(i == 0)
+		{
+			averageHiddenLayerBiasGradients = hiddenLayerBiasGradients;
+			averageHiddenLayerWeightGradients = hiddenLayerWeightGradients;
+			averageOutputLayerBiasGradients = outputLayerBiasGradients;
+			averageOutputLayerWeightGradients = outputLayerWeightGradients;
+		}
+		else
+		{
+			for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
+			{
+				averageHiddenLayerBiasGradients[x] += hiddenLayerBiasGradients[x];
+			}
+
+			for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
+			{
+				averageHiddenLayerWeightGradients[x] += hiddenLayerWeightGradients[x];
+			}
+
+			for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
+			{
+				averageOutputLayerBiasGradients[x] += outputLayerBiasGradients[x];
+			}
+
+			for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
+			{
+				averageOutputLayerWeightGradients[x] += outputLayerWeightGradients[x];
+			}
+		}
+	}
+
+
+
+	for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
+	{
+		averageHiddenLayerBiasGradients[x] = averageHiddenLayerBiasGradients[x] / batchSize; 
+	}
+
+	for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
+	{
+		averageHiddenLayerWeightGradients[x] = averageHiddenLayerWeightGradients[x] / batchSize;
+	}
+
+	for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
+	{
+		averageOutputLayerBiasGradients[x] = averageOutputLayerBiasGradients[x] / batchSize;
+	}
+
+	for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
+	{
+		averageOutputLayerWeightGradients[x] = averageOutputLayerWeightGradients[x] / batchSize;
+	}
+
+
+	purgeGradientDescentVectors();
+
+	hiddenLayerBiasGradients = averageHiddenLayerBiasGradients;
+	hiddenLayerWeightGradients = averageHiddenLayerWeightGradients;
+	outputLayerBiasGradients = averageOutputLayerBiasGradients;
+	outputLayerWeightGradients = averageOutputLayerWeightGradients;
+
+	delete label;
+}
+
+void NeuralNetwork::batchGradientDescent(int epochs, int batchSize, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels) {
+
+	// Run all epochs
 	for(int epoch = 0; epoch < epochs; epoch++)
 	{
-
-		Mat img(28, 28, CV_8UC1);
-		int* label = new int(0);
-
 		int* imgCounter = new int(0);
 		int* labelCounter = new int(0);
 
-		vector<float> averageHiddenLayerBiasGradients;
-		vector<float> averageHiddenLayerWeightGradients;
-		vector<float> averageOutputLayerBiasGradients;
-		vector<float> averageOutputLayerWeightGradients;
-
-
-		for (unsigned int i = 0; i < trainingSetSize; i++)
+		// Run all batches in current epoch
+		for (unsigned int g = 0; g < trainingSetSize / batchSize; g++)
 		{
-			purgeGradientDescentVectors();
-			dispense_mnist_image(imgCounter, trainingImages, img);
-			dispense_mnist_label(labelCounter, trainingLabels, label);
-			fireNeuralNetwork(img, (float) *label);
-			calculateHiddenLayerGradients();
-			calculateOutputLayerGradients();
-
-			if(i == 0)
-			{
-				averageHiddenLayerBiasGradients = hiddenLayerBiasGradients;
-				averageHiddenLayerWeightGradients = hiddenLayerWeightGradients;
-				averageOutputLayerBiasGradients = outputLayerBiasGradients;
-				averageOutputLayerWeightGradients = outputLayerWeightGradients;
-			}
-			else
-			{
-				for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
-				{
-					averageHiddenLayerBiasGradients[x] += hiddenLayerBiasGradients[x];
-				}
-
-				for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
-				{
-					averageHiddenLayerWeightGradients[x] += hiddenLayerWeightGradients[x];
-				}
-
-				for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
-				{
-					averageOutputLayerBiasGradients[x] += outputLayerBiasGradients[x];
-				}
-
-				for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
-				{
-					averageOutputLayerWeightGradients[x] += outputLayerWeightGradients[x];
-				}
-			}
+			computeBatchAverageGradients(batchSize, trainingImages, trainingLabels, imgCounter, labelCounter);
+			computeDeltaVs();
+			UpdateNetworkVariables();
 		}
 
-		for(unsigned int x = 0; x < averageHiddenLayerBiasGradients.size(); x++)
-		{
-			averageHiddenLayerBiasGradients[x] = averageHiddenLayerBiasGradients[x] / trainingSetSize; 
-		}
-
-		for(unsigned int x = 0; x < averageHiddenLayerWeightGradients.size(); x++)
-		{
-			averageHiddenLayerWeightGradients[x] = averageHiddenLayerWeightGradients[x] / trainingSetSize;
-		}
-
-		for(unsigned int x = 0; x < averageOutputLayerBiasGradients.size(); x++)
-		{
-			averageOutputLayerBiasGradients[x] = averageOutputLayerBiasGradients[x] / trainingSetSize;
-		}
-
-		for(unsigned int x = 0; x < averageOutputLayerWeightGradients.size(); x++)
-		{
-			averageOutputLayerWeightGradients[x] = averageOutputLayerWeightGradients[x] / trainingSetSize;
-		}
-
-
-		purgeGradientDescentVectors();
-
-		hiddenLayerBiasGradients = averageHiddenLayerBiasGradients;
-		hiddenLayerWeightGradients = averageHiddenLayerWeightGradients;
-		outputLayerBiasGradients = averageOutputLayerBiasGradients;
-		outputLayerWeightGradients = averageOutputLayerWeightGradients;
-
-
-		computeDeltaVs();
-		UpdateNetworkVariables();
-		delete label;
 		delete imgCounter;
 		delete labelCounter;
-
-		if (epoch/10 == 0)
-		{
-			testNetwork(testSetSize, testImageSet, testLabelSet);
-		}
-
-	}
+	}			
 }
+
+// Prints all weights and biases for each layer in network
+void NeuralNetwork::printNetworkVariables() {
+
+	cout << "Hidden Layer Bias':" << endl;
+	for (int i = 0; i < hiddenLayer.size(); i++)
+	{
+		cout << "[" << hiddenLayer[i]->bias << "] ";
+	}
+	cout << endl << endl;
+
+
+	cout << "Hidden Layer Weights:" << endl;
+	for(int i = 0; i < hiddenLayer.size(); i++)
+	{
+		cout << "Hidden Layer Neuron=" << i << " Weights:" << endl;
+		for (int x = 0; x < hiddenLayer[i]->inputWeights.size(); x++)
+		{
+			cout << "[" << hiddenLayer[i]->inputWeights[x] << "] ";
+		}
+		cout << endl << endl;
+	}
+	cout << endl << endl;
+
+	cout << "Output Layer Bias':" << endl;
+	for (int i = 0; i < outputLayer.size(); i++)
+	{
+		cout << "[" << outputLayer[i]->bias << "] ";
+	}
+	cout << endl << endl;
+	
+	cout << "Output Layer Weights:" << endl;
+	for(int i = 0; i < outputLayer.size(); i++)
+	{
+		cout << "Output Layer Neuron=" << i << " Weights:" << endl;
+		for(int x = 0; x < outputLayer[i]->inputWeights.size(); x++)
+		{
+			cout << "[" << outputLayer[i]->inputWeights[x] << "] ";
+		}
+		cout << endl << endl;
+	}
+	cout << endl << endl;
+
+
+}
+
 
 void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
 
@@ -738,8 +798,8 @@ void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, un
 	int* imgCounter = new int(0);
 	int* labelCounter = new int(0);
 
-	int correctCount = 0;
-	int incorrectCount = 0;
+	int correct = 0;
+	int incorrect = 0;
 
 	for(int i = 0; i < testSetSize; i++)
 	{
@@ -747,56 +807,57 @@ void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, un
 		dispense_mnist_label(labelCounter, testLabelSet, label);	
 		fireNeuralNetwork(img, (float)*label);
 
-		int actualMax = 0;
-		int actualMaxIndex = 0;
-	
+		int maxIndex = 0;
 
-		cout << "Test Run: " << i << endl;
-		cout << "OutputNeurons Actual--->   ";
-		for (unsigned int x = 0; x < outputLayer.size(); x++)
+
+		cout << "Output Layer Actual Output (Label=" << *label << ")--->   ";
+		for (int x = 0; x < outputLayer.size(); x++)
 		{
 			cout << "[" << outputLayer[x]->output << "]";
-
-			if (outputLayer[x]->output > actualMax)
+			
+			if(outputLayer[x]->output > outputLayer[maxIndex]->output)
 			{
-				actualMax = outputLayer[x]->output;
-				actualMaxIndex = x;
+				maxIndex = x;
 			}
 		}
-
-		cout << endl;
-
-		cout << "OutputNeurons Target--->   ";
-		for (unsigned int x = 0; x < outputLayer.size(); x++)
+		cout << endl << endl;
+		if(maxIndex == *label)
 		{
-			if (x == *label)
-			{
-				cout << "[1]";
-				if(actualMaxIndex == x)
-				{
-					correctCount++;
-				}
-				else
-				{
-					incorrectCount++;
-				}
-			}
-			else
-			{
-				cout << "[0]";
-			}
+			correct++;
 		}
-		cout << endl;
-		cout << endl;
-
-	}
-
+		else
+		{
+			incorrect++;
+		}
+	}	
 
 	cout << endl << endl << endl;
-	cout << "Correct=" << correctCount << endl;
-	cout << "Incorrect=" << incorrectCount << endl << endl;
-
+	cout << "Correct=" << correct << endl;
+	cout << "Incorrect=" << incorrect << endl;
+	
+	delete label;
+	delete imgCounter;
+	delete labelCounter;
 }
+
+
+
+
+
+
+// Set network initialization parameters
+Mat img(28, 28, CV_8UC1); // Set matrix dimensions (type must be CV_8UC1 as network cannot handle other types)
+int hiddenLayerSize = 30;
+int outputLayerSize = 10;
+int learningRate = 3;
+
+// Set gradient descent initialization parameters
+int trainImageSetSize = 60000;
+int batchSize = 20;
+int epochs = 1;
+
+// Set number of images in test set
+int testImageSetSize = 10000;
 
 
 int main(int argc, char** argv)
@@ -805,24 +866,23 @@ int main(int argc, char** argv)
 	// Load images and labels into memory
 	unsigned char* images = read_mnist_images(argv[1]);
 	unsigned char* labels = read_mnist_labels(argv[2]);
-
 	unsigned char* testImages = read_mnist_images(argv[3]);
 	unsigned char* testLabels = read_mnist_labels(argv[4]);
 
-	// Get img dimensions for network initialization
-	Mat img(28, 28, CV_8UC1);
-	struct imgDimensions dims = getImgDimensions(img);
 
 	// Initialize network and various network components
 	NeuralNetwork nn;
-	nn.populateInputLayer(dims);
-	nn.populateHiddenLayer(30);
-	nn.populateOutputLayer(10);
+	nn.populateInputLayer(img);
+	nn.populateHiddenLayer(hiddenLayerSize);
+	nn.populateOutputLayer(outputLayerSize);
 	nn.setDefaultWeights();
-	nn.setLearningRate(0.005);
+	nn.setLearningRate(learningRate);
 
 
-	nn.batchGradientDescent(100, 60000, images, labels, 10000, testImages, testLabels);
+	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, images, labels);
+	nn.testNetwork(testImageSetSize, testImages, testLabels);
+
+
 	return 0;
 }	
 	
