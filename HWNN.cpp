@@ -109,6 +109,11 @@ class NeuralNetwork
 
 public:
 
+
+	NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate);
+
+	struct imgDimensions networkInputDimensions;
+
 	// Network Layers
 	vector<SigmoidNeuron*> inputLayer;
 	vector<SigmoidNeuron*> hiddenLayer;
@@ -138,7 +143,7 @@ public:
 	void updateOutputLayer();
 	void purgeHiddenLayer();
 	void purgeOutputLayer();
-	void populateInputLayer(Mat img);
+	void populateInputLayer();
 	void populateHiddenLayer(int hLayerSize);
 	void populateOutputLayer(int oLayerSize);
 	void fireNeuralNetwork(Mat inputImage, float targetValue);
@@ -156,6 +161,17 @@ public:
 
 	void printNetworkVariables();
 };
+
+NeuralNetwork::NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate) {
+
+	networkInputDimensions = getImgDimensions(img);
+	populateInputLayer();
+	populateHiddenLayer(hLayerSize);
+	populateOutputLayer(oLayerSize);
+	setDefaultWeights();
+	setLearningRate(learningRate);
+}
+
 
 // Populates layers with default weights and Biases (must be called after populating
 // all layers (using populateXXXXXX functions)
@@ -193,15 +209,17 @@ void NeuralNetwork::setDefaultWeights() {
 
 void NeuralNetwork::feedInputLayer(Mat img) {
 
-	struct imgDimensions dims = getImgDimensions(img);
+	int rows = networkInputDimensions.rows;
+	int cols = networkInputDimensions.cols;
 
 	uchar* p = img.data;
 	int currentNeuron = 0;
 
-	for (int i = 0; i < dims.rows; i++)
+	for (int i = 0; i < rows; i++)
 	{
 		p = img.ptr<uchar>(i);
-		for (int x = 0; x< dims.cols; x++)
+
+		for (int x = 0; x < cols; x++)
 		{
 			inputLayer[currentNeuron]->output = (float)p[x] / 255.00;
 			currentNeuron++;
@@ -253,11 +271,14 @@ void NeuralNetwork::purgeOutputLayer() {
 
 }
 
-void NeuralNetwork::populateInputLayer(Mat img) {
+// Populates input layer of network with appropriate number of neurons. Expects 
+// that networkInputDimensions has already been set by network constructor.
+void NeuralNetwork::populateInputLayer() {
 
-	struct imgDimensions dims = getImgDimensions(img); 
+	int rows = networkInputDimensions.rows;
+	int cols = networkInputDimensions.cols;
 
-	for (int i = 0; i < dims.rows*dims.cols; i++)
+	for (int i = 0; i < rows*cols; i++)
 	{
 		this->inputLayer.push_back(new SigmoidNeuron);
 	}
@@ -646,7 +667,9 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize, unsigned char* 
 	vector<float> averageOutputLayerBiasGradients(outputLayer.size());
 	vector<float> averageOutputLayerWeightGradients(hiddenLayer.size() * outputLayer.size());
 
-	Mat img (28,28, CV_8UC1);
+	int rows = networkInputDimensions.rows;
+	int cols = networkInputDimensions.cols;
+	Mat img (rows,cols, CV_8UC1);
 	int* label = new int(0);
 
 	for(int i = 0; i < batchSize; i++)
@@ -792,8 +815,9 @@ void NeuralNetwork::printNetworkVariables() {
 void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
 
 
-
-	Mat img(28, 28, CV_8UC1);
+	int rows = networkInputDimensions.rows;
+	int cols = networkInputDimensions.cols;
+	Mat img(rows, cols, CV_8UC1);
 	int* label = new int(0);
 	int* imgCounter = new int(0);
 	int* labelCounter = new int(0);
@@ -841,7 +865,231 @@ void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, un
 }
 
 
+class ImageHandler {
 
+private:
+	virtual void dispense_image(){};
+	virtual void load_images(){};
+	virtual void dispense_label(){};
+	virtual void load_labels(){};
+};
+
+
+
+class MNISTImageHandler: public ImageHandler {
+
+public:
+
+	MNISTImageHandler(int rows, int cols, const char* imagesPath, const char* labelsPath);
+
+	void dispense_image();
+	void load_images();
+	void dispense_label();
+	void load_labels();
+
+
+
+
+	// For loading+dispensing images
+	int* imgCounter;
+	unsigned char* images;
+	Mat imgDest;
+	const char* MNISTImagesPath;
+
+	// For loading+dispensing labels
+	int* labelCounter;
+	unsigned char* labels;
+	int* labelDest;
+	const char* MNISTLabelsPath;
+
+
+	// Images functions
+	void setImgCounter(int counterValue);
+	void setImages(unsigned char* imagesAddress);
+	void setMNISTImagesPath(const char* path);
+
+
+	// Label functions
+	void setLabelCounter(int counterValue);
+	void setLabels(unsigned char* labelsAddress);
+	void setMNISTLabelsPath(const char* path);
+	void setLabel(int labelValue);
+	
+	// General functions
+	int reverseInt(int i);
+};
+
+
+MNISTImageHandler::MNISTImageHandler(int rows, int cols, const char* imagesPath, const char* labelsPath) {
+
+
+	imgCounter = new int(0);
+	imgDest.zeros(rows, cols, CV_8UC1);	
+	MNISTImagesPath = imagesPath;
+
+	labelCounter = new int(0);
+	labelDest = new int(0);
+	MNISTLabelsPath = labelsPath;
+}
+
+int MNISTImageHandler::reverseInt(int i)
+{
+	unsigned char c1, c2, c3, c4;
+
+	c1 = i & 255;
+	c2 = (i >> 8) & 255;
+	c3 = (i >> 16) & 255;
+	c4 = (i >> 24) & 255;
+
+	return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
+}
+
+
+
+
+// Image functions
+void MNISTImageHandler::setImgCounter(int counterValue) {
+
+	*imgCounter = counterValue;
+}
+
+void MNISTImageHandler::setImages(unsigned char* imagesAddress) {
+
+	images = imagesAddress;
+}
+
+void MNISTImageHandler::setMNISTImagesPath(const char* path) {
+
+	MNISTImagesPath = path;
+}
+
+
+// Label functions
+void MNISTImageHandler::setMNISTLabelsPath(const char* path) {
+
+	MNISTLabelsPath = path;
+}
+
+void MNISTImageHandler::setLabelCounter(int counterValue) {
+
+	*labelCounter = counterValue;
+}
+
+void MNISTImageHandler::setLabels(unsigned char* labelsAddress) {
+
+	labels = labelsAddress;
+}
+
+void MNISTImageHandler::setLabel(int labelValue) {
+
+	*labelDest = labelValue;
+}
+
+// Reads and loads mnist data set into memory
+void MNISTImageHandler::load_images()
+{
+	ifstream file(MNISTImagesPath);
+	unsigned char* imagesAddress;
+
+	if (file.is_open())
+	{
+		int magic_number = 0;
+		int number_of_images = 0;
+		int n_rows = 0;
+		int n_cols = 0;
+
+		file.read((char*)&magic_number, sizeof(magic_number));
+		magic_number = this->reverseInt(magic_number);
+
+		file.read((char*)&number_of_images, sizeof(number_of_images));
+		number_of_images = this->reverseInt(number_of_images);
+
+		file.read((char*)&n_rows, sizeof(n_rows));
+		n_rows = this->reverseInt(n_rows);
+
+		file.read((char*)&n_cols, sizeof(n_cols));
+		n_cols = this->reverseInt(n_cols);
+
+		imagesAddress = new unsigned char[number_of_images * 784];
+		int imagesCounter = 0;
+
+		for (int i = 0; i<number_of_images; ++i)
+		{
+			for (int r = 0; r<n_rows; ++r)
+			{
+				for (int c = 0; c<n_cols; ++c)
+				{
+					unsigned char temp = 0;
+					file.read((char*)&temp, sizeof(temp));
+					imagesAddress[imagesCounter] = temp;
+					imagesCounter++;
+				}
+			}
+		}
+	}
+	
+	this->setImages(imagesAddress);
+}
+
+
+
+
+
+// Takes array containing mnist images and starting position of desired image in that array,
+// and returns Mat containing desired image
+void MNISTImageHandler::dispense_image() {
+
+	uchar* p = imgDest.data;
+
+	for (unsigned int row = 0; row < 28; row++)
+	{
+		p = imgDest.ptr<uchar>(row);
+
+		for (unsigned int col = 0; col < 28; col++)
+		{
+			p[col] = images[*imgCounter];
+			*imgCounter = *imgCounter + 1;
+		}
+	}
+}
+
+
+void MNISTImageHandler::load_labels() {
+
+	ifstream file(MNISTLabelsPath);
+	unsigned char* labelsAddress;
+
+
+	if (file.is_open())
+	{
+
+		int magic_number = 0;
+		int number_of_labels = 0;
+
+		file.read((char*)&magic_number, sizeof(magic_number));
+		magic_number = this->reverseInt(magic_number);
+
+		file.read((char*)&number_of_labels, sizeof(number_of_labels));
+		number_of_labels = this->reverseInt(number_of_labels);
+
+		labelsAddress = new unsigned char[number_of_labels];
+
+		for (unsigned int i = 0; i < number_of_labels; i++)
+		{
+			unsigned char temp = 0;
+			file.read((char*)&temp, sizeof(temp));
+			labelsAddress[i] = temp;
+		}
+	}
+
+	labels = labelsAddress;
+}
+
+void MNISTImageHandler::dispense_label() {
+
+	*labelDest = labels[*labelCounter];
+	*labelCounter = *labelCounter + 1;
+}
 
 
 
@@ -863,27 +1111,30 @@ int testImageSetSize = 10000;
 int main(int argc, char** argv)
 {
 
+
 	// Load images and labels into memory
-	unsigned char* images = read_mnist_images(argv[1]);
-	unsigned char* labels = read_mnist_labels(argv[2]);
+	unsigned char* trainImages = read_mnist_images(argv[1]);
+	unsigned char* trainLabels = read_mnist_labels(argv[2]);
 	unsigned char* testImages = read_mnist_images(argv[3]);
 	unsigned char* testLabels = read_mnist_labels(argv[4]);
 
 
-	// Initialize network and various network components
-	NeuralNetwork nn;
-	nn.populateInputLayer(img);
-	nn.populateHiddenLayer(hiddenLayerSize);
-	nn.populateOutputLayer(outputLayerSize);
-	nn.setDefaultWeights();
-	nn.setLearningRate(learningRate);
+	NeuralNetwork nn(img, hiddenLayerSize, outputLayerSize, learningRate);
+	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, trainImages, trainLabels);
+	nn.testNetwork(testImageSetSize, testImages, testLabels);
 
 
-	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, images, labels);
+
+	MNISTImageHandler* test = new MNISTImageHandler(28,28,argv[1],argv[2]);
+	test->load_images();
+	test->load_labels();
+
+	trainImages = test->images;
+	trainLabels = test->labels;
+	
+	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, trainImages, trainLabels);
 	nn.testNetwork(testImageSetSize, testImages, testLabels);
 
 
 	return 0;
 }	
-	
-	
