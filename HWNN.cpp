@@ -10,7 +10,7 @@
 #include<iomanip>
 #include<map>
 #include<cmath>
-
+#include</home/julian/MachineLearning/ImageHandler.hpp>
 
 using namespace std;
 using namespace cv;
@@ -110,8 +110,9 @@ class NeuralNetwork
 public:
 
 
-	NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate);
+	NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate, ImageHandler* iHandler);
 
+	ImageHandler* iHandler;
 	struct imgDimensions networkInputDimensions;
 
 	// Network Layers
@@ -154,15 +155,15 @@ public:
 	void computeDeltaVs();
 	void UpdateNetworkVariables();
 	void purgeGradientDescentVectors();
-	void computeBatchAverageGradients (int batchSize, unsigned char* imageSet, unsigned char* labelSet, int* imgCounter, int* labelCounter);
-	void batchGradientDescent(int epochs, int batchSize, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels);
-	void testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet);
+	void computeBatchAverageGradients (int batchSize);
+	void batchGradientDescent(int epochs, int batchSize, int trainingSetSize);
+	void testNetwork(int testSetSize);
 
 
 	void printNetworkVariables();
 };
 
-NeuralNetwork::NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate) {
+NeuralNetwork::NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float learningRate, ImageHandler* iHandler) {
 
 	networkInputDimensions = getImgDimensions(img);
 	populateInputLayer();
@@ -170,6 +171,7 @@ NeuralNetwork::NeuralNetwork(Mat img, int hLayerSize, int oLayerSize, float lear
 	populateOutputLayer(oLayerSize);
 	setDefaultWeights();
 	setLearningRate(learningRate);
+	this->iHandler = iHandler;
 }
 
 
@@ -544,123 +546,9 @@ void NeuralNetwork::purgeGradientDescentVectors() {
 	hiddenLayerBiasDeltaVs.clear();
 }
 
-// bitwise black magic
-int reverseInt(int i)
-{
-	unsigned char c1, c2, c3, c4;
-
-	c1 = i & 255;
-	c2 = (i >> 8) & 255;
-	c3 = (i >> 16) & 255;
-	c4 = (i >> 24) & 255;
-
-	return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
-}
-
-unsigned char* read_mnist_labels(const char* full_path) {
-
-	ifstream file(full_path);
-	unsigned char* labels;
-
-
-	if (file.is_open())
-	{
-
-		int magic_number = 0;
-		int number_of_labels = 0;
-
-		file.read((char*)&magic_number, sizeof(magic_number));
-		magic_number = reverseInt(magic_number);
-
-		file.read((char*)&number_of_labels, sizeof(number_of_labels));
-		number_of_labels = reverseInt(number_of_labels);
-
-		labels = new unsigned char[number_of_labels];
-
-		for (unsigned int i = 0; i < number_of_labels; i++)
-		{
-			unsigned char temp = 0;
-			file.read((char*)&temp, sizeof(temp));
-			labels[i] = temp;
-		}
-	}
-
-	return labels;
-
-}
-
-// Reads and loads mnist data set into memory
-unsigned char* read_mnist_images(const char* full_path)
-{
-	ifstream file(full_path);
-	unsigned char* images;
-
-	if (file.is_open())
-	{
-		int magic_number = 0;
-		int number_of_images = 0;
-		int n_rows = 0;
-		int n_cols = 0;
-
-		file.read((char*)&magic_number, sizeof(magic_number));
-		magic_number = reverseInt(magic_number);
-
-		file.read((char*)&number_of_images, sizeof(number_of_images));
-		number_of_images = reverseInt(number_of_images);
-
-		file.read((char*)&n_rows, sizeof(n_rows));
-		n_rows = reverseInt(n_rows);
-
-		file.read((char*)&n_cols, sizeof(n_cols));
-		n_cols = reverseInt(n_cols);
-
-		images = new unsigned char[number_of_images * 784];
-		int imagesCounter = 0;
-
-		for (int i = 0; i<number_of_images; ++i)
-		{
-			for (int r = 0; r<n_rows; ++r)
-			{
-				for (int c = 0; c<n_cols; ++c)
-				{
-					unsigned char temp = 0;
-					file.read((char*)&temp, sizeof(temp));
-					images[imagesCounter] = temp;
-					imagesCounter++;
-				}
-			}
-		}
-	}
-	return images;
-}
-
-// Takes array containing mnist images and starting position of desired image in that array,
-// and returns Mat containing desired image
-void dispense_mnist_image(int* imgCounter, unsigned char* images, Mat imgDest) {
-
-	uchar* p = imgDest.data;
-
-	for (unsigned int row = 0; row < 28; row++)
-	{
-		p = imgDest.ptr<uchar>(row);
-
-		for (unsigned int col = 0; col < 28; col++)
-		{
-			p[col] = images[*imgCounter];
-			*imgCounter = *imgCounter + 1;
-		}
-	}
-}
-
-void dispense_mnist_label(int* labelCounter, unsigned char* labels, int* labelDest) {
-
-	*labelDest = labels[*labelCounter];
-	*labelCounter = *labelCounter + 1;
-}
-
 
 // Computes average gradient for a given batch 
-void NeuralNetwork::computeBatchAverageGradients (int batchSize, unsigned char* imageSet, unsigned char* labelSet, int* imgCounter, int* labelCounter) {
+void NeuralNetwork::computeBatchAverageGradients (int batchSize) {
 
 	vector<float> averageHiddenLayerBiasGradients(hiddenLayer.size());
 	vector<float> averageHiddenLayerWeightGradients(inputLayer.size() * hiddenLayer.size());
@@ -670,14 +558,14 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize, unsigned char* 
 	int rows = networkInputDimensions.rows;
 	int cols = networkInputDimensions.cols;
 	Mat img (rows,cols, CV_8UC1);
-	int* label = new int(0);
+	int label;
 
 	for(int i = 0; i < batchSize; i++)
 	{
 		purgeGradientDescentVectors();
-		dispense_mnist_image(imgCounter, imageSet, img);
-		dispense_mnist_label(labelCounter, labelSet, label);
-		fireNeuralNetwork(img, (float) *label);
+		img = iHandler->dispense_image();
+		label = iHandler->dispense_label();
+		fireNeuralNetwork(img, (float) label);
 		calculateHiddenLayerGradients();
 		calculateOutputLayerGradients();
 
@@ -741,28 +629,20 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize, unsigned char* 
 	hiddenLayerWeightGradients = averageHiddenLayerWeightGradients;
 	outputLayerBiasGradients = averageOutputLayerBiasGradients;
 	outputLayerWeightGradients = averageOutputLayerWeightGradients;
-
-	delete label;
 }
 
-void NeuralNetwork::batchGradientDescent(int epochs, int batchSize, int trainingSetSize, unsigned char* trainingImages, unsigned char* trainingLabels) {
+void NeuralNetwork::batchGradientDescent(int epochs, int batchSize, int trainingSetSize) {
 
 	// Run all epochs
 	for(int epoch = 0; epoch < epochs; epoch++)
 	{
-		int* imgCounter = new int(0);
-		int* labelCounter = new int(0);
-
 		// Run all batches in current epoch
 		for (unsigned int g = 0; g < trainingSetSize / batchSize; g++)
 		{
-			computeBatchAverageGradients(batchSize, trainingImages, trainingLabels, imgCounter, labelCounter);
+			computeBatchAverageGradients(batchSize);
 			computeDeltaVs();
 			UpdateNetworkVariables();
 		}
-
-		delete imgCounter;
-		delete labelCounter;
 	}			
 }
 
@@ -812,29 +692,27 @@ void NeuralNetwork::printNetworkVariables() {
 }
 
 
-void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, unsigned char* testLabelSet) {
+void NeuralNetwork::testNetwork(int testSetSize) {
 
 
 	int rows = networkInputDimensions.rows;
 	int cols = networkInputDimensions.cols;
 	Mat img(rows, cols, CV_8UC1);
-	int* label = new int(0);
-	int* imgCounter = new int(0);
-	int* labelCounter = new int(0);
+	int label;
 
 	int correct = 0;
 	int incorrect = 0;
 
 	for(int i = 0; i < testSetSize; i++)
 	{
-		dispense_mnist_image(imgCounter, testImageSet, img);
-		dispense_mnist_label(labelCounter, testLabelSet, label);	
-		fireNeuralNetwork(img, (float)*label);
+		img = iHandler->dispense_image();
+		label = iHandler->dispense_label();
+		fireNeuralNetwork(img, (float)label);
 
 		int maxIndex = 0;
 
 
-		cout << "Output Layer Actual Output (Label=" << *label << ")--->   ";
+		cout << "Output Layer Actual Output (Label=" << label << ")--->   ";
 		for (int x = 0; x < outputLayer.size(); x++)
 		{
 			cout << "[" << outputLayer[x]->output << "]";
@@ -845,7 +723,7 @@ void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, un
 			}
 		}
 		cout << endl << endl;
-		if(maxIndex == *label)
+		if(maxIndex == label)
 		{
 			correct++;
 		}
@@ -858,238 +736,10 @@ void NeuralNetwork::testNetwork(int testSetSize, unsigned char* testImageSet, un
 	cout << endl << endl << endl;
 	cout << "Correct=" << correct << endl;
 	cout << "Incorrect=" << incorrect << endl;
-	
-	delete label;
-	delete imgCounter;
-	delete labelCounter;
-}
-
-
-class ImageHandler {
-
-private:
-	virtual void dispense_image(){};
-	virtual void load_images(){};
-	virtual void dispense_label(){};
-	virtual void load_labels(){};
-};
-
-
-
-class MNISTImageHandler: public ImageHandler {
-
-public:
-
-	MNISTImageHandler(int rows, int cols, const char* imagesPath, const char* labelsPath);
-
-	void dispense_image();
-	void load_images();
-	void dispense_label();
-	void load_labels();
-
-
-
-
-	// For loading+dispensing images
-	int* imgCounter;
-	unsigned char* images;
-	Mat imgDest;
-	const char* MNISTImagesPath;
-
-	// For loading+dispensing labels
-	int* labelCounter;
-	unsigned char* labels;
-	int* labelDest;
-	const char* MNISTLabelsPath;
-
-
-	// Images functions
-	void setImgCounter(int counterValue);
-	void setImages(unsigned char* imagesAddress);
-	void setMNISTImagesPath(const char* path);
-
-
-	// Label functions
-	void setLabelCounter(int counterValue);
-	void setLabels(unsigned char* labelsAddress);
-	void setMNISTLabelsPath(const char* path);
-	void setLabel(int labelValue);
-	
-	// General functions
-	int reverseInt(int i);
-};
-
-
-MNISTImageHandler::MNISTImageHandler(int rows, int cols, const char* imagesPath, const char* labelsPath) {
-
-
-	imgCounter = new int(0);
-	imgDest.zeros(rows, cols, CV_8UC1);	
-	MNISTImagesPath = imagesPath;
-
-	labelCounter = new int(0);
-	labelDest = new int(0);
-	MNISTLabelsPath = labelsPath;
-}
-
-int MNISTImageHandler::reverseInt(int i)
-{
-	unsigned char c1, c2, c3, c4;
-
-	c1 = i & 255;
-	c2 = (i >> 8) & 255;
-	c3 = (i >> 16) & 255;
-	c4 = (i >> 24) & 255;
-
-	return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
 }
 
 
 
-
-// Image functions
-void MNISTImageHandler::setImgCounter(int counterValue) {
-
-	*imgCounter = counterValue;
-}
-
-void MNISTImageHandler::setImages(unsigned char* imagesAddress) {
-
-	images = imagesAddress;
-}
-
-void MNISTImageHandler::setMNISTImagesPath(const char* path) {
-
-	MNISTImagesPath = path;
-}
-
-
-// Label functions
-void MNISTImageHandler::setMNISTLabelsPath(const char* path) {
-
-	MNISTLabelsPath = path;
-}
-
-void MNISTImageHandler::setLabelCounter(int counterValue) {
-
-	*labelCounter = counterValue;
-}
-
-void MNISTImageHandler::setLabels(unsigned char* labelsAddress) {
-
-	labels = labelsAddress;
-}
-
-void MNISTImageHandler::setLabel(int labelValue) {
-
-	*labelDest = labelValue;
-}
-
-// Reads and loads mnist data set into memory
-void MNISTImageHandler::load_images()
-{
-	ifstream file(MNISTImagesPath);
-	unsigned char* imagesAddress;
-
-	if (file.is_open())
-	{
-		int magic_number = 0;
-		int number_of_images = 0;
-		int n_rows = 0;
-		int n_cols = 0;
-
-		file.read((char*)&magic_number, sizeof(magic_number));
-		magic_number = this->reverseInt(magic_number);
-
-		file.read((char*)&number_of_images, sizeof(number_of_images));
-		number_of_images = this->reverseInt(number_of_images);
-
-		file.read((char*)&n_rows, sizeof(n_rows));
-		n_rows = this->reverseInt(n_rows);
-
-		file.read((char*)&n_cols, sizeof(n_cols));
-		n_cols = this->reverseInt(n_cols);
-
-		imagesAddress = new unsigned char[number_of_images * 784];
-		int imagesCounter = 0;
-
-		for (int i = 0; i<number_of_images; ++i)
-		{
-			for (int r = 0; r<n_rows; ++r)
-			{
-				for (int c = 0; c<n_cols; ++c)
-				{
-					unsigned char temp = 0;
-					file.read((char*)&temp, sizeof(temp));
-					imagesAddress[imagesCounter] = temp;
-					imagesCounter++;
-				}
-			}
-		}
-	}
-	
-	this->setImages(imagesAddress);
-}
-
-
-
-
-
-// Takes array containing mnist images and starting position of desired image in that array,
-// and returns Mat containing desired image
-void MNISTImageHandler::dispense_image() {
-
-	uchar* p = imgDest.data;
-
-	for (unsigned int row = 0; row < 28; row++)
-	{
-		p = imgDest.ptr<uchar>(row);
-
-		for (unsigned int col = 0; col < 28; col++)
-		{
-			p[col] = images[*imgCounter];
-			*imgCounter = *imgCounter + 1;
-		}
-	}
-}
-
-
-void MNISTImageHandler::load_labels() {
-
-	ifstream file(MNISTLabelsPath);
-	unsigned char* labelsAddress;
-
-
-	if (file.is_open())
-	{
-
-		int magic_number = 0;
-		int number_of_labels = 0;
-
-		file.read((char*)&magic_number, sizeof(magic_number));
-		magic_number = this->reverseInt(magic_number);
-
-		file.read((char*)&number_of_labels, sizeof(number_of_labels));
-		number_of_labels = this->reverseInt(number_of_labels);
-
-		labelsAddress = new unsigned char[number_of_labels];
-
-		for (unsigned int i = 0; i < number_of_labels; i++)
-		{
-			unsigned char temp = 0;
-			file.read((char*)&temp, sizeof(temp));
-			labelsAddress[i] = temp;
-		}
-	}
-
-	labels = labelsAddress;
-}
-
-void MNISTImageHandler::dispense_label() {
-
-	*labelDest = labels[*labelCounter];
-	*labelCounter = *labelCounter + 1;
-}
 
 
 
@@ -1110,31 +760,14 @@ int testImageSetSize = 10000;
 
 int main(int argc, char** argv)
 {
-
-
-	// Load images and labels into memory
-	unsigned char* trainImages = read_mnist_images(argv[1]);
-	unsigned char* trainLabels = read_mnist_labels(argv[2]);
-	unsigned char* testImages = read_mnist_images(argv[3]);
-	unsigned char* testLabels = read_mnist_labels(argv[4]);
-
-
-	NeuralNetwork nn(img, hiddenLayerSize, outputLayerSize, learningRate);
-	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, trainImages, trainLabels);
-	nn.testNetwork(testImageSetSize, testImages, testLabels);
-
-
-
-	MNISTImageHandler* test = new MNISTImageHandler(28,28,argv[1],argv[2]);
-	test->load_images();
-	test->load_labels();
-
-	trainImages = test->images;
-	trainLabels = test->labels;
+	MNISTImageHandler* imageHandler = new MNISTImageHandler(28,28,argv[1],argv[2]);
+	NeuralNetwork nn(img, hiddenLayerSize, outputLayerSize, learningRate, imageHandler);
 	
-	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize, trainImages, trainLabels);
-	nn.testNetwork(testImageSetSize, testImages, testLabels);
+	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize);
 
 
+	MNISTImageHandler* imageHandler2 = new MNISTImageHandler(28,28,argv[3],argv[4]);
+	nn.iHandler = imageHandler2;	
+	nn.testNetwork(testImageSetSize);
 	return 0;
-}	
+}
