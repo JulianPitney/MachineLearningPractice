@@ -34,11 +34,15 @@ public:
 	// For loading+dispensing images
 	int* imgCounter;
 	unsigned char* images;
+	int imageSetSize;
+	int currentImage;
 	const char* MNISTImagesPath;
 
 	// For loading+dispensing labels
 	int* labelCounter;
 	unsigned char* labels;
+	int labelSetSize;
+	int currentLabel;
 	int* labelDest;
 	const char* MNISTLabelsPath;
 

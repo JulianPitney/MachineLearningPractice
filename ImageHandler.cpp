@@ -46,6 +46,7 @@ void MNISTImageHandler::load_images()
 
 		file.read((char*)&number_of_images, sizeof(number_of_images));
 		number_of_images = this->reverseInt(number_of_images);
+		imageSetSize = number_of_images;
 
 		file.read((char*)&n_rows, sizeof(n_rows));
 		n_rows = this->reverseInt(n_rows);
@@ -71,6 +72,7 @@ void MNISTImageHandler::load_images()
 		}
 	}
 	
+	currentImage = 0;
 	images = imagesAddress;	
 }
 
@@ -97,6 +99,15 @@ Mat MNISTImageHandler::dispense_image() {
 		}
 	}
 
+	currentImage++;
+
+	// Check if image set is exhausted, if yes, reset it.
+	if (currentImage == imageSetSize)
+	{
+		currentImage = 0;
+		*imgCounter = 0;
+	}
+
 	return img;
 }
 
@@ -120,6 +131,7 @@ void MNISTImageHandler::load_labels() {
 
 		file.read((char*)&number_of_labels, sizeof(number_of_labels));
 		number_of_labels = this->reverseInt(number_of_labels);
+		labelSetSize = number_of_labels;
 
 		labelsAddress = new unsigned char[number_of_labels];
 
@@ -130,7 +142,7 @@ void MNISTImageHandler::load_labels() {
 			labelsAddress[i] = temp;
 		}
 	}
-
+	currentLabel = 0;
 	labels = labelsAddress;
 }
 
@@ -139,5 +151,13 @@ int MNISTImageHandler::dispense_label() {
 
 	int label = labels[*labelCounter];
 	*labelCounter = *labelCounter + 1;
+	currentLabel++;
+
+	// Check if set has been exhausted, if(yes): go back to start of label set
+	if (currentLabel == labelSetSize)
+	{
+		currentLabel = 0;
+		*labelCounter = 0;
+	}
 	return label;
 }
