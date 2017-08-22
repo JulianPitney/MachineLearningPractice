@@ -12,8 +12,17 @@
 #include<cmath>
 #include</home/julian/MachineLearning/ImageHandler.hpp>
 #include<chrono>
+#include<pthread.h>
+#include<cstdlib>
+
+
+
 using namespace std;
 using namespace cv;
+
+
+#define NUM_THREADS 4
+
 
 struct imgDimensions {
 
@@ -142,6 +151,8 @@ public:
 	void setTargetValue(float targetValue);
 	void setDefaultWeights();
 	void updateHiddenLayer();
+	static void* parallelUpdateHiddenLayer(void* neuron);
+
 	void updateOutputLayer();
 	void purgeHiddenLayer();
 	void purgeOutputLayer();
@@ -239,12 +250,75 @@ void NeuralNetwork::setTargetValue(float targetValue) {
 	this->targetValue = targetValue;
 }
 
+
+struct pkg {
+
+	SigmoidNeuron* neuron;
+	vector<SigmoidNeuron*>* inputLayer;
+
+};
+
+void *NeuralNetwork::parallelUpdateHiddenLayer(void* input) {
+
+	struct pkg* P = (struct pkg*) input;
+
+	P->neuron->collectInputs(*P->inputLayer);
+	P->neuron->calculateOutput();
+
+	delete P;
+	pthread_exit(NULL);
+}
+
+
 void NeuralNetwork::updateHiddenLayer() {
 
-	for (unsigned int i = 0; i < hiddenLayer.size(); i++)
+	pthread_t threads[hiddenLayer.size()];
+	pthread_attr_t attr;
+
+	pthread_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+	void* status;
+	int rc;
+
+
+
+	for (unsigned int i = 0; i < hiddenLayer.size(); i=i+4)
 	{	
-		hiddenLayer[i]->collectInputs(inputLayer);
-		hiddenLayer[i]->calculateOutput();
+		struct pkg* P = new pkg;
+		P->neuron = hiddenLayer[i];
+		P->inputLayer = &inputLayer;
+		pthread_create(&threads[i], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
+
+		P = new pkg;
+		P->neuron = hiddenLayer[i+1];
+		P->inputLayer = &inputLayer;
+		pthread_create(&threads[i+1], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
+
+		P = new pkg;
+		P->neuron = hiddenLayer[i+2];
+		P->inputLayer = &inputLayer;
+		pthread_create(&threads[i+2], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
+
+		P = new pkg;
+		P->neuron = hiddenLayer[i+3];
+		P->inputLayer = &inputLayer;
+		pthread_create(&threads[i+3], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
+
+		for(int x = i; x < i + 4; x++)
+		{
+			rc = pthread_join(threads[x], &status);
+			if(rc)
+			{
+	
+				cout << "Error: unable to join, " << rc << endl;
+				exit(-1);
+			}
+			else 
+			{
+				cout << "updateHiddenLayer: completed threadID=" << x;
+				cout << " exiting with status: " << status << endl;
+			}
+		}
 	}
 }
 
@@ -311,6 +385,8 @@ void NeuralNetwork::fireNeuralNetwork(Mat inputImage, float targetValue) {
 	purgeOutputLayer();
 	feedInputLayer(inputImage);
 	setTargetValue(targetValue);
+
+	// Need to block until updateHiddenLayer workers are finished...
 	updateHiddenLayer();
 	updateOutputLayer();
 
@@ -472,9 +548,6 @@ void NeuralNetwork::setLearningRate(float learningRate) {
 // These need to be purged after each input
 void NeuralNetwork::computeDeltaVs() {
 
-
-
-	// NOTE: TEMPORARILY REMOVED "*-1" to all deltaV calculations
 	for (unsigned int i = 0; i < outputLayerBiasGradients.size(); i++)
 	{
 		float tempDeltaV = (learningRate)*(outputLayerBiasGradients[i]);
@@ -546,10 +619,6 @@ void NeuralNetwork::purgeGradientDescentVectors() {
 // Computes average gradient for a given batch 
 void NeuralNetwork::computeBatchAverageGradients (int batchSize) {
 
-	
-	auto start= chrono::steady_clock::now();
-
-
 	vector<float> averageHiddenLayerBiasGradients(hiddenLayer.size());
 	vector<float> averageHiddenLayerWeightGradients(inputLayer.size() * hiddenLayer.size());
 	vector<float> averageOutputLayerBiasGradients(outputLayer.size());
@@ -565,28 +634,9 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize) {
 		purgeGradientDescentVectors();
 		img = iHandler->dispense_image();
 		label = iHandler->dispense_label();
-		
-		auto fire_start = chrono::steady_clock::now();
-
 		fireNeuralNetwork(img, (float) label);
-		auto fire_end = chrono::steady_clock::now();
-		auto fire_diff = fire_end - fire_start;
-		cout << "fireNeuralNetwork() run time" << endl;
-		cout << chrono::duration <double, nano> (fire_diff).count() << " ns" << endl;
-
-		auto grad_start = chrono::steady_clock::now();
 		calculateHiddenLayerGradients();
-		auto grad_end = chrono::steady_clock::now();
-		auto grad_diff = grad_end - grad_start;
-		cout << "calculateHiddenLayerGradients() run time" << endl;
-		cout << chrono::duration <double, nano> (grad_diff).count() << " ns" << endl;
-
-
-
-
 		calculateOutputLayerGradients();
-
-		auto start2 = chrono::steady_clock::now();
 
 		if(i == 0)
 		{
@@ -617,11 +667,6 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize) {
 				averageOutputLayerWeightGradients[x] += outputLayerWeightGradients[x];
 			}
 		}
-		
-		auto end2 = chrono::steady_clock::now();
-		auto diff2 = end2 - start2;
-		cout << "Summing Gradient Vectors run time" << endl;
-		cout << chrono::duration <double, nano> (diff2).count() << " ns" << endl;
 	}
 
 
@@ -653,14 +698,6 @@ void NeuralNetwork::computeBatchAverageGradients (int batchSize) {
 	hiddenLayerWeightGradients = averageHiddenLayerWeightGradients;
 	outputLayerBiasGradients = averageOutputLayerBiasGradients;
 	outputLayerWeightGradients = averageOutputLayerWeightGradients;
-	
-
-	auto end = chrono::steady_clock::now();
-	auto diff = end - start;
-
-
-	cout << "computeBatchAverageGradients() run time" << endl;
-	cout << chrono::duration <double,nano> (diff).count() << " ns" << endl;
 }
 
 void NeuralNetwork::batchGradientDescent(int epochs, int batchSize, int trainingSetSize) {
@@ -777,14 +814,14 @@ void NeuralNetwork::testNetwork(int testSetSize) {
 
 // Set network initialization parameters
 Mat img(28, 28, CV_8UC1); // Set matrix dimensions (type must be CV_8UC1 as network cannot handle other types)
-int hiddenLayerSize = 30;
+int hiddenLayerSize = 32;
 int outputLayerSize = 10;
 int learningRate = 3;
 
 // Set gradient descent initialization parameters
 int trainImageSetSize = 60000;
 int batchSize = 20;
-int epochs = 5;
+int epochs = 1;
 
 // Set number of images in test set
 int testImageSetSize = 10000;
@@ -797,12 +834,12 @@ int main(int argc, char** argv)
 	NeuralNetwork nn(img, hiddenLayerSize, outputLayerSize, learningRate, imageHandler);
 	nn.batchGradientDescent(epochs, batchSize, trainImageSetSize);
 
-	/*
+	
 	// Test network
 	MNISTImageHandler* imageHandler2 = new MNISTImageHandler(28,28,argv[3],argv[4]);
 	nn.iHandler = imageHandler2;	
 	nn.testNetwork(testImageSetSize);
-	*/
+	
 
 	return 0;
 }
