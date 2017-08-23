@@ -253,72 +253,72 @@ void NeuralNetwork::setTargetValue(float targetValue) {
 
 struct pkg {
 
-	SigmoidNeuron* neuron;
-	vector<SigmoidNeuron*>* inputLayer;
-
+	vector<SigmoidNeuron*>* IL;
+	vector<SigmoidNeuron*>* HL;
+	unsigned int startNeuronIndex;
+	unsigned int endNeuronIndex;
 };
+
 
 void *NeuralNetwork::parallelUpdateHiddenLayer(void* input) {
 
 	struct pkg* P = (struct pkg*) input;
 
-	P->neuron->collectInputs(*P->inputLayer);
-	P->neuron->calculateOutput();
+	vector<SigmoidNeuron*>* il = P->IL;
+	vector<SigmoidNeuron*>* hl = P->HL;
 
-	delete P;
-	pthread_exit(NULL);
+	for(unsigned int i = P->startNeuronIndex; i <= P->endNeuronIndex; i++)
+	{
+		*hl[i]->collectInputs(*P->IL);
+		*hl[i]->calculateOutput();
+	}
+
 }
 
 
 void NeuralNetwork::updateHiddenLayer() {
 
-	pthread_t threads[hiddenLayer.size()];
+	pthread_t threads[NUM_THREADS];
 	pthread_attr_t attr;
-
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	void* status;
 	int rc;
+	void* status;
+
+	int workload_per_thread = hiddenLayer.size() / NUM_THREADS;
+	int remainder_work = hiddenLayer.size() % NUM_THREADS;
+
+	struct pkg* thread1_workload = new pkg();
+	thread1_workload->IL = &inputLayer;
+	thread1_workload->HL = &hiddenLayer;
+	thread1_workload->startNeuronIndex = 0;
+	thread1_workload->endNeuronIndex = workload_per_thread - 1;
+	pthread_create(&threads[0], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) thread1_workload);
+
+	struct pkg* thread2_workload = new pkg();
+	thread1_workload->IL = &inputLayer;
+	thread1_workload->HL = &hiddenLayer;
+	thread2_workload->startNeuronIndex = thread1_workload->endNeuronIndex + 1;
+	thread2_workload->endNeuronIndex = thread2_workload->startNeuronIndex + workload_per_thread -1;
+	pthread_create(&threads[1], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) thread2_workload);
+
+	struct pkg* thread3_workload = new pkg();
+	thread1_workload->IL = &inputLayer;
+	thread1_workload->HL = &hiddenLayer;
+	thread3_workload->startNeuronIndex = thread2_workload->endNeuronIndex + 1;
+	thread3_workload->endNeuronIndex = thread3_workload->startNeuronIndex + workload_per_thread - 1;
+	pthread_create(&threads[2], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) thread3_workload);
+
+	struct pkg* thread4_workload = new pkg();
+	thread1_workload->IL = &inputLayer;
+	thread1_workload->HL = &hiddenLayer;
+	thread4_workload->startNeuronIndex = thread3_workload->endNeuronIndex + 1;
+	thread4_workload->endNeuronIndex = thread4_workload->startNeuronIndex + workload_per_thread - 1 + remainder_work;
 
 
-
-	for (unsigned int i = 0; i < hiddenLayer.size(); i=i+4)
-	{	
-		struct pkg* P = new pkg;
-		P->neuron = hiddenLayer[i];
-		P->inputLayer = &inputLayer;
-		pthread_create(&threads[i], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
-
-		P = new pkg;
-		P->neuron = hiddenLayer[i+1];
-		P->inputLayer = &inputLayer;
-		pthread_create(&threads[i+1], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
-
-		P = new pkg;
-		P->neuron = hiddenLayer[i+2];
-		P->inputLayer = &inputLayer;
-		pthread_create(&threads[i+2], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
-
-		P = new pkg;
-		P->neuron = hiddenLayer[i+3];
-		P->inputLayer = &inputLayer;
-		pthread_create(&threads[i+3], &attr, NeuralNetwork::parallelUpdateHiddenLayer, (void*) P);
-
-		for(int x = i; x < i + 4; x++)
-		{
-			rc = pthread_join(threads[x], &status);
-			if(rc)
-			{
-	
-				cout << "Error: unable to join, " << rc << endl;
-				exit(-1);
-			}
-			else 
-			{
-				cout << "updateHiddenLayer: completed threadID=" << x;
-				cout << " exiting with status: " << status << endl;
-			}
-		}
+	for(int i = 0; i < NUM_THREADS; i++)
+	{
+		pthread_join(threads[i], &status);
 	}
 }
 
